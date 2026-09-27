@@ -22,7 +22,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v0.6 — SOC Integrations + Kali Linux validation**
+> **v0.7 — Web Investigation Dashboard**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -33,6 +33,7 @@ SOCMind is continuously validated on:
 - Windows + Python 3.11 / 3.12
 - Ubuntu + Python 3.11 / 3.12
 - **Kali Linux Rolling** inside the official `kalilinux/kali-rolling` container
+- Web dashboard smoke-tested on Kali Linux CI
 
 ## Kali Linux quick start
 
@@ -72,6 +73,52 @@ socmind analyze examples/linux_attack_chain.jsonl \
 ```
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
+
+## Web Investigation Dashboard
+
+SOCMind now includes a local browser-based investigation workbench with:
+
+- executive investigation metrics
+- prioritized T1/T2 findings
+- evidence-based hypotheses
+- interactive draggable evidence graph
+- event timeline
+- extracted IOCs
+- observed MITRE ATT&CK techniques
+- local FastAPI endpoint for future integrations
+
+Install:
+
+```bash
+pip install -e ".[web]"
+```
+
+Launch:
+
+```bash
+socmind web examples/attack_chain.jsonl \
+  --case-id DEMO-001
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765
+```
+
+Kali Linux:
+
+```bash
+source .venv/bin/activate
+pip install -e ".[all]"
+
+socmind web examples/linux_attack_chain.jsonl \
+  --case-id KALI-DEMO-001
+```
+
+The dashboard binds to `127.0.0.1` by default so investigation data is not exposed to the network accidentally.
+
+Detailed guide: [Web Investigation Dashboard](docs/web-dashboard.md)
 
 ## SIEM integrations
 
