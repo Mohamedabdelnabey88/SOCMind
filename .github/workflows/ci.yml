@@ -17,5 +17,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
-      - run: pip install pytest
+      - run: pip install -e . pytest
+      - run: python -m compileall -q src
       - run: pytest -q
+      - run: socmind analyze examples/attack_chain.jsonl --timeline
+      - run: socmind analyze examples/linux_attack_chain.jsonl --timeline
