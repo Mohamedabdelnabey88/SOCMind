@@ -279,6 +279,32 @@ socmind gaps examples/attack_chain.jsonl --rules detections
 socmind tune examples/dispositions.jsonl
 ```
 
+## One-command investigation workspace
+
+For a realistic analyst workflow, SOCMind can build a complete investigation package from normalized telemetry:
+
+```bash
+socmind investigate examples/attack_chain.jsonl \
+  -o demo-case \
+  --case-id DEMO-001 \
+  --priority P1 \
+  --owner mohamed
+```
+
+The workspace contains:
+
+```text
+demo-case/
+├── case-state.json
+├── case.json
+├── escalation.md
+├── shift-handoff.md
+├── evidence-provenance.json
+└── workspace-summary.json
+```
+
+This is useful for both real analyst handoff and a portfolio demonstration because it shows the complete path from telemetry to a documented, attributable investigation.
+
 ## Full investigation workflow
 
 ```bash
@@ -300,6 +326,8 @@ socmind analyze normalized.jsonl \
 - [SOC Integrations](docs/soc-integrations.md)
 - [Kali Linux](docs/kali-linux.md)
 - [Case 001](docs/cases/case-001-authentication-to-persistence.md)
+- [Real SOC Workflow](docs/real-soc-workflow.md)
+- [Portfolio / Interview Story](docs/portfolio-story.md)
 
 ## CI quality gate
 
