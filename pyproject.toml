@@ -4,12 +4,21 @@ build-backend = "hatchling.build"
 
 [project]
 name = "socmind"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cross-platform SOC Tier 1/2 investigation and evidence-correlation toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "Mohamed Abdelnaby"}]
+keywords = ["soc", "blue-team", "dfir", "siem", "windows", "linux", "mitre-attack"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Security",
+]
 dependencies = []
 
 [project.scripts]
@@ -17,3 +26,4 @@ socmind = "socmind.cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+testpaths = ["tests"]
