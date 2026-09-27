@@ -135,6 +135,12 @@ def build_parser() -> argparse.ArgumentParser:
     escalate_cmd.add_argument("events")
     escalate_cmd.add_argument("--case-id", required=True)
     escalate_cmd.add_argument("-o", "--output", required=True)
+
+    web_cmd = sub.add_parser("web", help="Launch the local investigation dashboard")
+    web_cmd.add_argument("events", help="Normalized JSONL investigation file")
+    web_cmd.add_argument("--case-id", default="SOCMIND-WEB")
+    web_cmd.add_argument("--host", default="127.0.0.1")
+    web_cmd.add_argument("--port", type=int, default=8765)
     return parser
 
 
@@ -277,6 +283,17 @@ def main() -> None:
         events = load_jsonl(args.events)
         export_escalation_package(events, analyze(events), args.output, case_id=args.case_id)
         print(f"Escalation package exported -> {args.output}")
+        return
+
+    if args.command == "web":
+        try:
+            import uvicorn
+        except ImportError as exc:
+            raise RuntimeError("Web dashboard requires: pip install 'socmind[web]'") from exc
+        from .webapp import create_app
+        app = create_app(args.events, case_id=args.case_id)
+        print(f"SOCMind Web -> http://{args.host}:{args.port}")
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
         return
 
     if args.command == "ingest":
