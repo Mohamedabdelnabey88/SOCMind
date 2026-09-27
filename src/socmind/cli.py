@@ -12,6 +12,7 @@ from .adapters import (
     parse_windows_event_xml,
 )
 from .case import export_case
+from .audit import append_audit
 from .case_workflow import assign, load_case, new_case, save_case, transition
 from .coverage import build_coverage, detection_gaps, render_coverage
 from .detections import evaluate_rule, load_rule, load_rules
@@ -170,6 +171,13 @@ def build_parser() -> argparse.ArgumentParser:
     handoff_cmd.add_argument("events")
     handoff_cmd.add_argument("--case-id", required=True)
     handoff_cmd.add_argument("-o", "--output")
+
+    audit_cmd = sub.add_parser("audit", help="Append an analyst action to the case audit trail")
+    audit_cmd.add_argument("journal")
+    audit_cmd.add_argument("--case-id", required=True)
+    audit_cmd.add_argument("--actor", required=True)
+    audit_cmd.add_argument("--action", required=True)
+    audit_cmd.add_argument("--detail", required=True)
 
     return parser
 
@@ -357,6 +365,17 @@ def main() -> None:
             print(f"Shift handoff exported -> {args.output}")
         else:
             print(text)
+        return
+
+    if args.command == "audit":
+        entry = append_audit(
+            args.journal,
+            case_id=args.case_id,
+            actor=args.actor,
+            action=args.action,
+            detail=args.detail,
+        )
+        print(f"Audit appended -> {args.journal} | {entry.case_id} | {entry.action}")
         return
 
     if args.command == "web":
