@@ -2,9 +2,9 @@
 
 **SOCMind** is an open-source, cross-platform investigation workbench for **SOC Tier 1 / Tier 2 analysts** on **Windows and Linux**.
 
-It is designed around a simple idea: an alert should not end at a rule match. SOCMind turns telemetry into **explainable triage, evidence correlation, investigation timelines, MITRE ATT&CK context, escalation guidance, and analyst-ready reporting**.
+It is designed around a simple idea: an alert should not end at a rule match. SOCMind turns telemetry into **explainable triage, evidence correlation, investigation timelines, MITRE ATT&CK context, IOC extraction, escalation guidance, and analyst-ready reporting**.
 
-> **v0.2 — ingestion + explainable triage**
+> **v0.3 — deeper telemetry + IOC workflow**
 >
 > SOCMind is not a SIEM replacement. It is an analyst workflow and investigation layer.
 
@@ -17,36 +17,37 @@ Most log tools answer **"what matched?"**. SOCMind is being built to answer:
 - **What should Tier 1 validate next?**
 - **When should it escalate to Tier 2?**
 - **What happened before and after the alert?**
-- **Which ATT&CK techniques are represented?**
+- **Which indicators should the analyst pivot on?**
 - **Can the same investigation logic work across Windows and Linux?**
 
 ## Cross-platform architecture
 
 ```text
-Windows                                  Linux
-├── Security Event XML                   ├── auth.log / secure
-├── Sysmon                               ├── journald
-└── PowerShell                           ├── auditd (roadmap)
-        │                                └── systemd / cron
-        └──────────────┬────────────────────────┘
-                       ▼
-             Normalized Event Model
-                       ▼
-                Detection Engine
-                       ▼
-             Evidence Correlation
-                       ▼
-          Explainable Tier-1 Triage
-                       ▼
-                 P1 / P2 / P3
-                       ▼
-             Tier-2 Investigation
-               ┌───────┴────────┐
-               ▼                ▼
-        MITRE ATT&CK        Timeline
-               └───────┬────────┘
-                       ▼
-               Analyst Report
+Windows                                      Linux
+├── Native EVTX (optional)                   ├── auth.log / secure
+├── Event Viewer XML                         ├── journald
+├── Sysmon telemetry                         ├── auditd
+└── PowerShell                               └── systemd / cron
+        │                                           │
+        └────────────────┬──────────────────────────┘
+                         ▼
+               Normalized Event Model
+                         ▼
+                  Detection Engine
+                         ▼
+               Evidence Correlation
+                   ┌─────┴─────┐
+                   ▼           ▼
+            IOC Extraction   Timeline
+                   └─────┬─────┘
+                         ▼
+            Explainable T1 Triage
+                         ▼
+                   P1 / P2 / P3
+                         ▼
+                T2 Investigation
+                         ▼
+                 Analyst Report
 ```
 
 See [Architecture](docs/architecture.md).
@@ -54,7 +55,6 @@ See [Architecture](docs/architecture.md).
 ## Current detections
 
 ### Windows
-
 - Repeated `4625` failures followed by `4624` success.
 - Suspicious PowerShell command-line behavior.
 - PowerShell followed by outbound network activity.
@@ -62,21 +62,18 @@ See [Architecture](docs/architecture.md).
 - Windows Service persistence (`7045`).
 
 ### Linux
-
 - Repeated SSH failures followed by successful login.
 - Suspicious privileged `sudo` commands.
 - systemd persistence-related activity.
 - cron persistence model.
 
-## Raw telemetry ingestion
+## Telemetry ingestion
 
 ### Linux auth.log / secure
 
 ```bash
 socmind ingest linux-auth /var/log/auth.log \
   --host web-01 --year 2026 -o normalized.jsonl
-
-socmind analyze normalized.jsonl --timeline
 ```
 
 ### systemd journal
@@ -84,23 +81,44 @@ socmind analyze normalized.jsonl --timeline
 ```bash
 journalctl -o json > journal.jsonl
 socmind ingest journald journal.jsonl -o normalized.jsonl
-socmind analyze normalized.jsonl
+```
+
+### Linux auditd
+
+```bash
+socmind ingest auditd /var/log/audit/audit.log \
+  --host web-01 -o normalized.jsonl
 ```
 
 ### Windows Event Viewer XML
 
-Export selected events as XML, then:
-
 ```powershell
 socmind ingest windows-xml .\security-events.xml -o .\normalized.jsonl
-socmind analyze .\normalized.jsonl --timeline
 ```
 
-Native binary `.evtx` support is on the next ingestion milestone; XML support keeps the current core dependency-free and cross-platform.
+### Native Windows EVTX
 
-## Explainable triage
+The base installation stays dependency-free. Native EVTX is an optional extra:
 
-A finding is not just a severity label. SOCMind provides:
+```bash
+pip install -e ".[evtx]"
+```
+
+Then:
+
+```powershell
+socmind ingest windows-evtx .\Security.evtx -o .\normalized.jsonl
+```
+
+The EVTX adapter reuses the same tested Windows normalizer, so binary EVTX and exported XML feed one event model.
+
+## Investigation workflow
+
+```bash
+socmind analyze normalized.jsonl --timeline --iocs
+```
+
+A finding includes:
 
 ```text
 HIGH | score=75 | Suspicious PowerShell execution
@@ -124,11 +142,28 @@ MITRE:
 T1059.001 PowerShell
 ```
 
-The recommendation is intentionally **analyst-in-the-loop**. SOCMind does not automatically declare an incident malicious or close a case.
+The recommendation is deliberately **analyst-in-the-loop**. SOCMind does not autonomously close cases or label users malicious.
+
+## IOC extraction
+
+SOCMind can pivot from normalized evidence to investigation indicators without requiring an external intelligence service:
+
+```bash
+socmind iocs normalized.jsonl
+socmind iocs normalized.jsonl --json
+```
+
+Currently extracted:
+- IPv4 indicators with scope classification
+- domains
+- HTTP/HTTPS URLs
+- MD5
+- SHA-1
+- SHA-256
+
+This is the first stage of the future enrichment pipeline; reputation lookups remain separate from evidence extraction.
 
 ## Investigation case
-
-The repository ships with a portfolio case that expresses one incident pattern across both operating systems:
 
 **Case 001 — Authentication to Persistence**
 
@@ -169,52 +204,41 @@ pip install -e .
 Run the safe sample investigations:
 
 ```bash
-socmind analyze examples/attack_chain.jsonl --timeline
-socmind analyze examples/linux_attack_chain.jsonl --timeline
+socmind analyze examples/attack_chain.jsonl --timeline --iocs
+socmind analyze examples/linux_attack_chain.jsonl --timeline --iocs
 ```
 
 ## CI quality gate
 
 Every push and pull request is tested on:
-
 - Ubuntu / Python 3.11
 - Ubuntu / Python 3.12
 - Windows / Python 3.11
 - Windows / Python 3.12
 
-CI validates package installation, byte-code compilation, automated tests, and both Windows/Linux demo investigations.
+CI validates installation, byte-code compilation, automated tests, and Windows/Linux demo investigations.
 
 ## Roadmap
 
-### v0.3 — deeper telemetry
-
-- Native EVTX parser
-- Sysmon-specific normalization
-- Linux auditd parser
-- process ancestry
-- DNS / network IOC extraction
-- IOC enrichment provider interface
-
 ### v0.4 — Tier 2 workbench
-
-- investigation graph
-- cross-source timeline reconstruction
-- reusable playbooks
+- Sysmon-specific enrichment
+- process ancestry graph
+- DNS and network correlation
+- reusable investigation playbooks
 - case JSON export
 - hypothesis / confidence model
 - analyst notes and dispositions
 
 ### v0.5 — detection engineering
-
 - Sigma interoperability
 - detection-gap analysis
 - rule-test fixtures
 - false-positive tuning feedback
 
 ### v1.0
-
 - web investigation workspace
 - SIEM adapters
+- IOC enrichment providers
 - case export
 - investigation playbook engine
 
