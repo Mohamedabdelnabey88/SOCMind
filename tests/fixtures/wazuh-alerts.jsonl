@@ -1,0 +1,1 @@
+{"timestamp":"2026-09-28T10:00:00Z","agent":{"name":"WS-01"},"rule":{"id":"60122","level":10,"description":"Multiple authentication failures"},"data":{"win":{"system":{"eventID":"4625","computer":"WS-01"},"eventdata":{"targetUserName":"analyst","ipAddress":"198.51.100.22"}}}}
