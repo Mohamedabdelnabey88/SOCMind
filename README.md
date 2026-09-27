@@ -1,137 +1,181 @@
 # SOCMind
 
-**SOCMind** is an open-source, cross-platform workbench for **SOC Tier 1 / Tier 2 analysts** on Windows and Linux.
+**SOCMind** is an open-source, cross-platform SOC Tier 1 / Tier 2 investigation and detection-engineering workbench for **Windows, Linux, and Kali Linux**.
 
-It connects the operational SOC loop end to end:
+It connects the SOC lifecycle end to end:
 
 ```text
-Telemetry
-   ↓
+Telemetry / SIEM
+      ↓
+Normalization
+      ↓
 Detection
-   ↓
+      ↓
 T1 Triage
-   ↓
+      ↓
 T2 Investigation
-   ↓
+      ↓
+Enrichment / Notes / Handoff
+      ↓
 Disposition
-   ↓
-Detection Feedback
-   ↓
-Rule Test / Coverage / Tuning
+      ↓
+Coverage / Gap Analysis / Tuning
 ```
 
-> **v0.5 — Detection Engineering Feedback Loop**
+> **v0.6 — SOC Integrations + Kali Linux validation**
 
-SOCMind is not a SIEM replacement. It is an analyst investigation and detection-quality layer.
+SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
-## Core capabilities
+## Platforms
 
-### T1 / T2 investigation
-- Windows EVTX/XML, Sysmon-shaped events and PowerShell
-- Linux auth.log, journald and auditd
-- evidence correlation
-- P1/P2/P3 triage
-- MITRE ATT&CK mapping
-- IOC extraction
-- evidence timeline
-- process ancestry
-- investigation graph
-- evidence-based hypotheses
-- reusable playbooks
-- portable case JSON
+SOCMind is continuously validated on:
 
-### Detection engineering
-- Sigma-style YAML rule loading
-- normalized-event rule execution
-- ATT&CK coverage matrix
-- detection-gap analysis
-- repeatable rule fixtures
-- false-positive tuning suggestions from analyst dispositions
+- Windows + Python 3.11 / 3.12
+- Ubuntu + Python 3.11 / 3.12
+- **Kali Linux Rolling** inside the official `kalilinux/kali-rolling` container
 
-See:
-- [Architecture](docs/architecture.md)
-- [Tier 2 Workbench](docs/tier2-workbench.md)
-- [Detection Engineering](docs/detection-engineering.md)
-- [Case 001](docs/cases/case-001-authentication-to-persistence.md)
+## Kali Linux quick start
 
-## Sigma interoperability
-
-SOCMind v0.5 supports a deliberately documented Sigma-compatible subset.
-
-Supported modifiers:
-- `contains`
-- `startswith`
-- `endswith`
-
-Supported conditions:
-- one named selection
-- simple `selection_a and selection_b`
-- simple `selection_a or selection_b`
-
-Unsupported syntax fails explicitly instead of being silently interpreted.
-
-Install Sigma YAML support:
+Modern Kali protects the system Python environment, so do **not** use `sudo pip install`.
 
 ```bash
-pip install -e ".[sigma]"
+sudo apt update
+sudo apt install -y git python3 python3-venv python3-pip
+
+git clone https://github.com/Mohamedabdelnabey88/SOCMind.git
+cd SOCMind
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+pip install -e ".[all]"
 ```
 
-Evaluate a rule:
+Verify:
+
+```bash
+socmind --help
+pytest -q
+```
+
+Run a full Kali investigation:
+
+```bash
+socmind analyze examples/linux_attack_chain.jsonl \
+  --timeline \
+  --iocs \
+  --graph \
+  --hypotheses \
+  --case-output kali-case.json \
+  --case-id KALI-DEMO-001
+```
+
+Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
+
+## SIEM integrations
+
+### Wazuh
+
+```bash
+socmind ingest wazuh alerts.jsonl -o normalized.jsonl
+```
+
+### Elastic ECS
+
+```bash
+socmind ingest elastic events.ndjson -o normalized.jsonl
+```
+
+Both feed the same normalized investigation pipeline.
+
+## Threat Intelligence enrichment
+
+v0.6 introduces a provider interface. The included provider is offline/local so demos do not require API keys:
+
+```bash
+socmind enrich normalized.jsonl \
+  --local-intel examples/local-intel.json
+```
+
+This clean separation lets future providers integrate VirusTotal, MISP, OpenCTI, AbuseIPDB, or internal intelligence without coupling them to the investigation engine.
+
+## Analyst notes and dispositions
+
+```bash
+socmind note analyst-notes.jsonl \
+  --case-id INC-2026-001 \
+  --author analyst1 \
+  --text "Validated source IP against VPN inventory." \
+  --disposition needs-review
+```
+
+Notes are append-only JSONL so they remain transparent, portable, and easy to integrate later.
+
+## Tier 2 / IR escalation package
+
+```bash
+socmind escalate normalized.jsonl \
+  --case-id INC-2026-001 \
+  -o escalation.md
+```
+
+The Markdown handoff package includes:
+
+- executive summary
+- findings and scores
+- P1/P2/P3 context
+- ATT&CK techniques
+- IOC list
+- investigation hypotheses
+- recommended handoff actions
+
+## Existing investigation capabilities
+
+- Windows EVTX/XML
+- Linux auth.log / secure
+- journald
+- auditd
+- Wazuh JSON alerts
+- Elastic ECS NDJSON
+- Windows authentication correlation
+- SSH authentication correlation
+- suspicious PowerShell analysis
+- Windows/Linux persistence analysis
+- MITRE ATT&CK mapping
+- IOC extraction
+- process ancestry
+- evidence timeline
+- investigation graph
+- hypothesis model
+- reusable playbooks
+- structured case JSON
+
+## Detection engineering
+
+SOCMind also includes:
+
+- Sigma-style YAML rule loading
+- rule execution against normalized events
+- ATT&CK coverage matrix
+- detection-gap finder
+- rule regression fixtures
+- analyst-disposition-based tuning feedback
+
+Examples:
 
 ```bash
 socmind detect detections/windows/suspicious-powershell.yml \
   tests/fixtures/rule-events.jsonl
-```
 
-## Detection coverage and gap finder
-
-SOCMind compares ATT&CK techniques observed during an investigation with ATT&CK tags in the local rule pack.
-
-```bash
 socmind coverage examples/attack_chain.jsonl --rules detections
-```
 
-Example concept:
-
-```text
-Technique     Observed  Covered
-T1059.001     yes       yes
-T1053.005     yes       yes
-T1110         yes       no
-T1078         yes       no
-```
-
-Show only uncovered observed techniques:
-
-```bash
 socmind gaps examples/attack_chain.jsonl --rules detections
-```
 
-A reported gap means **the local rule pack does not currently cover that observed ATT&CK technique**. It is not proof the technique cannot be detected.
-
-## Rule tests
-
-Detection behavior is locked to sanitized fixtures.
-
-```bash
-socmind rule-test \
-  detections/windows/suspicious-powershell.yml \
-  tests/fixtures/powershell-rule-test.json
-```
-
-The command exits non-zero when the expected match count changes, making it suitable for CI.
-
-## False-positive tuning feedback
-
-Analyst decisions can be supplied as JSONL:
-
-```bash
 socmind tune examples/dispositions.jsonl
 ```
 
-SOCMind requires a minimum evidence threshold before suggesting tuning. It recommends scoped exclusions based on repeated benign context instead of globally suppressing the behavior.
-
-## Full investigation
+## Full investigation workflow
 
 ```bash
 socmind analyze normalized.jsonl \
@@ -144,104 +188,54 @@ socmind analyze normalized.jsonl \
   --case-id INC-2026-001
 ```
 
-## Telemetry ingestion
+## Documentation
 
-Linux auth:
-
-```bash
-socmind ingest linux-auth /var/log/auth.log \
-  --host web-01 --year 2026 -o normalized.jsonl
-```
-
-journald:
-
-```bash
-journalctl -o json > journal.jsonl
-socmind ingest journald journal.jsonl -o normalized.jsonl
-```
-
-auditd:
-
-```bash
-socmind ingest auditd /var/log/audit/audit.log \
-  --host web-01 -o normalized.jsonl
-```
-
-Windows XML:
-
-```powershell
-socmind ingest windows-xml .\security-events.xml -o .\normalized.jsonl
-```
-
-Native EVTX:
-
-```bash
-pip install -e ".[evtx]"
-```
-
-```powershell
-socmind ingest windows-evtx .\Security.evtx -o .\normalized.jsonl
-```
-
-Install all optional features:
-
-```bash
-pip install -e ".[all]"
-```
-
-## Included portfolio rules
-
-```text
-detections/
-├── windows/
-│   ├── suspicious-powershell.yml
-│   └── scheduled-task.yml
-└── linux/
-    └── suspicious-useradd.yml
-```
-
-These are intentionally small and testable; the repository will grow as coverage cases are added.
+- [Architecture](docs/architecture.md)
+- [Tier 2 Workbench](docs/tier2-workbench.md)
+- [Detection Engineering](docs/detection-engineering.md)
+- [SOC Integrations](docs/soc-integrations.md)
+- [Kali Linux](docs/kali-linux.md)
+- [Case 001](docs/cases/case-001-authentication-to-persistence.md)
 
 ## CI quality gate
 
-Every push and pull request is validated on:
-
-- Ubuntu / Python 3.11
-- Ubuntu / Python 3.12
-- Windows / Python 3.11
-- Windows / Python 3.12
-
-CI now validates both the investigation workflow **and** the detection-engineering loop:
+Every pull request validates:
 
 - package installation
 - compilation
 - automated tests
-- Windows/Linux investigation demos
-- Sigma-style rule evaluation
-- rule fixture tests
-- ATT&CK coverage
-- gap analysis
-- disposition-based tuning
+- Windows investigation workflow
+- Linux investigation workflow
+- Wazuh parsing
+- Elastic ECS parsing
+- threat-intel enrichment
+- analyst notes
+- escalation package generation
+- Sigma-style detection rules
+- rule regression tests
+- ATT&CK coverage and gaps
+- false-positive tuning
+- **Kali Rolling installation and execution**
 
 ## Roadmap
 
-### v0.6 — SOC integrations
-- threat-intelligence enrichment providers
-- SIEM adapters
-- analyst notes and dispositions
-- ticket/case connector interfaces
-- rule-pack expansion
-
-### v0.7 — detection maturity
+### v0.7 — Detection maturity
 - richer Sigma condition support
-- detection coverage dashboards
-- rule metadata quality checks
+- larger Windows/Linux rule packs
+- detection metadata quality checks
+- coverage dashboard artifacts
 - regression corpus
-- detection health scoring
+
+### v0.8 — Integrations
+- MISP / OpenCTI provider interface
+- Wazuh API integration
+- Elastic query/export helpers
+- ticketing adapters
+- analyst workflow state
 
 ### v1.0
 - web investigation workspace
-- interactive graph
+- interactive evidence graph
 - case management
 - pluggable SIEM/SOAR integrations
 
