@@ -1,0 +1,11 @@
+{
+  "indicators": [
+    {
+      "type": "ip",
+      "value": "203.0.113.77",
+      "verdict": "suspicious-demo",
+      "confidence": 70,
+      "context": "Sanitized documentation-range indicator used only for SOCMind demonstrations."
+    }
+  ]
+}
