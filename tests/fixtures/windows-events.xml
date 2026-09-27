@@ -1,0 +1,24 @@
+<Events xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <Event>
+    <System>
+      <EventID>4625</EventID>
+      <TimeCreated SystemTime="2026-09-28T10:00:00.0000000Z"/>
+      <Computer>WS-023</Computer>
+    </System>
+    <EventData>
+      <Data Name="TargetUserName">analyst</Data>
+      <Data Name="IpAddress">198.51.100.22</Data>
+    </EventData>
+  </Event>
+  <Event>
+    <System>
+      <EventID>4624</EventID>
+      <TimeCreated SystemTime="2026-09-28T10:02:00.0000000Z"/>
+      <Computer>WS-023</Computer>
+    </System>
+    <EventData>
+      <Data Name="TargetUserName">analyst</Data>
+      <Data Name="IpAddress">198.51.100.22</Data>
+    </EventData>
+  </Event>
+</Events>
