@@ -20,5 +20,5 @@ jobs:
       - run: pip install -e . pytest
       - run: python -m compileall -q src
       - run: pytest -q
-      - run: socmind analyze examples/attack_chain.jsonl --timeline
-      - run: socmind analyze examples/linux_attack_chain.jsonl --timeline
+      - run: socmind analyze examples/attack_chain.jsonl --timeline --iocs --graph --process-tree --hypotheses --case-output case.json --case-id CI-WINDOWS
+      - run: socmind analyze examples/linux_attack_chain.jsonl --timeline --iocs --graph --hypotheses --case-output linux-case.json --case-id CI-LINUX
