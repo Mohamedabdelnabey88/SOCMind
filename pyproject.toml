@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "socmind"
-version = "0.2.0"
+version = "0.3.0"
 description = "Cross-platform SOC Tier 1/2 investigation and evidence-correlation toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -20,6 +20,9 @@ classifiers = [
   "Topic :: Security",
 ]
 dependencies = []
+
+[project.optional-dependencies]
+evtx = ["python-evtx>=0.8.1"]
 
 [project.scripts]
 socmind = "socmind.cli:main"
