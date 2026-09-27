@@ -2,9 +2,16 @@ import argparse
 import json
 from pathlib import Path
 
-from .adapters import parse_auth_log, parse_journald_json, parse_windows_event_xml
+from .adapters import (
+    parse_auditd,
+    parse_auth_log,
+    parse_evtx,
+    parse_journald_json,
+    parse_windows_event_xml,
+)
 from .engine import analyze
 from .io import load_jsonl
+from .ioc import extract_iocs
 from .report import render_text
 from .timeline import render_timeline
 
@@ -39,17 +46,42 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_cmd = sub.add_parser("analyze", help="Analyze normalized JSONL security events")
     analyze_cmd.add_argument("path", help="Path to JSONL event file")
     analyze_cmd.add_argument("--timeline", action="store_true", help="Print evidence timeline")
+    analyze_cmd.add_argument("--iocs", action="store_true", help="Extract IOCs from the investigation")
 
     ingest = sub.add_parser("ingest", help="Normalize raw Windows/Linux telemetry into JSONL")
-    ingest.add_argument("format", choices=["linux-auth", "journald", "windows-xml"])
+    ingest.add_argument(
+        "format",
+        choices=["linux-auth", "journald", "auditd", "windows-xml", "windows-evtx"],
+    )
     ingest.add_argument("path", help="Input telemetry file")
     ingest.add_argument("-o", "--output", required=True, help="Normalized JSONL output")
-    ingest.add_argument("--host", default="linux-host", help="Host name for auth.log sources")
+    ingest.add_argument("--host", default="linux-host", help="Host name for Linux text sources")
     ingest.add_argument("--year", type=int, help="Year for traditional syslog timestamps")
 
     timeline_cmd = sub.add_parser("timeline", help="Render a normalized evidence timeline")
     timeline_cmd.add_argument("path", help="Path to normalized JSONL event file")
+
+    ioc_cmd = sub.add_parser("iocs", help="Extract IP/domain/URL/hash indicators")
+    ioc_cmd.add_argument("path", help="Path to normalized JSONL event file")
+    ioc_cmd.add_argument("--json", action="store_true", help="Emit JSON")
     return parser
+
+
+def _print_iocs(events, as_json: bool = False) -> None:
+    iocs = extract_iocs(events)
+    if as_json:
+        print(json.dumps(
+            [{"type": i.type, "value": i.value, "scope": i.scope} for i in iocs],
+            indent=2,
+        ))
+        return
+    if not iocs:
+        print("No IOCs extracted.")
+        return
+    print("SOCMind IOC Summary")
+    print("===================")
+    for ioc in iocs:
+        print(f"{ioc.type.upper():7} | {ioc.scope:8} | {ioc.value}")
 
 
 def main() -> None:
@@ -61,10 +93,17 @@ def main() -> None:
         if args.timeline:
             print()
             print(render_timeline(events))
+        if args.iocs:
+            print()
+            _print_iocs(events)
         return
 
     if args.command == "timeline":
         print(render_timeline(load_jsonl(args.path)))
+        return
+
+    if args.command == "iocs":
+        _print_iocs(load_jsonl(args.path), as_json=args.json)
         return
 
     if args.command == "ingest":
@@ -72,6 +111,10 @@ def main() -> None:
             events = parse_auth_log(args.path, host=args.host, year=args.year)
         elif args.format == "journald":
             events = parse_journald_json(args.path)
+        elif args.format == "auditd":
+            events = parse_auditd(args.path, host=args.host)
+        elif args.format == "windows-evtx":
+            events = parse_evtx(args.path)
         else:
             events = parse_windows_event_xml(args.path)
         _events_to_jsonl(events, args.output)
