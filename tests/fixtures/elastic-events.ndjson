@@ -1,0 +1,1 @@
+{"@timestamp":"2026-09-28T10:03:00Z","host":{"name":"WS-01"},"event":{"code":"1"},"user":{"name":"analyst"},"process":{"name":"powershell.exe","executable":"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe","command_line":"powershell.exe -nop -w hidden","parent":{"name":"winword.exe"}},"destination":{"ip":"203.0.113.77"}}

@@ -5,18 +5,23 @@ from pathlib import Path
 from .adapters import (
     parse_auditd,
     parse_auth_log,
+    parse_elastic_ndjson,
     parse_evtx,
     parse_journald_json,
+    parse_wazuh_alerts,
     parse_windows_event_xml,
 )
 from .case import export_case
 from .coverage import build_coverage, detection_gaps, render_coverage
 from .detections import evaluate_rule, load_rule, load_rules
 from .engine import analyze
+from .enrichment import LocalIntelProvider, enrich_iocs
+from .escalation import export_escalation_package
 from .graph import render_mermaid
 from .hypothesis import generate_hypotheses
 from .io import load_jsonl
 from .ioc import extract_iocs
+from .notes import append_note
 from .process_tree import render_process_tree
 from .report import render_text
 from .rule_tests import run_rule_test
@@ -52,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     analyze_cmd = sub.add_parser("analyze", help="Analyze normalized JSONL security events")
-    analyze_cmd.add_argument("path", help="Path to JSONL event file")
+    analyze_cmd.add_argument("path")
     analyze_cmd.add_argument("--timeline", action="store_true")
     analyze_cmd.add_argument("--iocs", action="store_true")
     analyze_cmd.add_argument("--graph", action="store_true")
@@ -61,10 +66,18 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_cmd.add_argument("--case-output")
     analyze_cmd.add_argument("--case-id", default="SOCMIND-CASE")
 
-    ingest = sub.add_parser("ingest", help="Normalize raw Windows/Linux telemetry")
+    ingest = sub.add_parser("ingest", help="Normalize raw/SIEM telemetry")
     ingest.add_argument(
         "format",
-        choices=["linux-auth", "journald", "auditd", "windows-xml", "windows-evtx"],
+        choices=[
+            "linux-auth",
+            "journald",
+            "auditd",
+            "windows-xml",
+            "windows-evtx",
+            "wazuh",
+            "elastic",
+        ],
     )
     ingest.add_argument("path")
     ingest.add_argument("-o", "--output", required=True)
@@ -105,6 +118,23 @@ def build_parser() -> argparse.ArgumentParser:
     tune_cmd = sub.add_parser("tune", help="Suggest conservative false-positive tuning")
     tune_cmd.add_argument("dispositions")
     tune_cmd.add_argument("--min-samples", type=int, default=5)
+
+    enrich_cmd = sub.add_parser("enrich", help="Enrich extracted IOCs using configured providers")
+    enrich_cmd.add_argument("events")
+    enrich_cmd.add_argument("--local-intel", required=True)
+    enrich_cmd.add_argument("--json", action="store_true")
+
+    note_cmd = sub.add_parser("note", help="Append an analyst note/disposition")
+    note_cmd.add_argument("journal")
+    note_cmd.add_argument("--case-id", required=True)
+    note_cmd.add_argument("--author", required=True)
+    note_cmd.add_argument("--text", required=True)
+    note_cmd.add_argument("--disposition")
+
+    escalate_cmd = sub.add_parser("escalate", help="Export a Tier 2/IR handoff package")
+    escalate_cmd.add_argument("events")
+    escalate_cmd.add_argument("--case-id", required=True)
+    escalate_cmd.add_argument("-o", "--output", required=True)
     return parser
 
 
@@ -165,23 +195,18 @@ def main() -> None:
         return
 
     if args.command == "timeline":
-        print(render_timeline(load_jsonl(args.path)))
-        return
+        print(render_timeline(load_jsonl(args.path))); return
 
     if args.command == "iocs":
-        _print_iocs(load_jsonl(args.path), as_json=args.json)
-        return
+        _print_iocs(load_jsonl(args.path), as_json=args.json); return
 
     if args.command == "graph":
-        print(render_mermaid(load_jsonl(args.path)))
-        return
+        print(render_mermaid(load_jsonl(args.path))); return
 
     if args.command == "case":
         events = load_jsonl(args.path)
-        findings = analyze(events)
-        export_case(events, findings, args.output, case_id=args.case_id)
-        print(f"Case exported -> {args.output}")
-        return
+        export_case(events, analyze(events), args.output, case_id=args.case_id)
+        print(f"Case exported -> {args.output}"); return
 
     if args.command == "detect":
         rule = load_rule(args.rule)
@@ -196,41 +221,62 @@ def main() -> None:
         events = load_jsonl(args.events)
         findings = analyze(events)
         rules = load_rules(args.rules)
-        rows = (
-            build_coverage(findings, rules)
-            if args.command == "coverage"
-            else detection_gaps(findings, rules)
-        )
-        print(render_coverage(rows))
-        return
+        rows = build_coverage(findings, rules) if args.command == "coverage" else detection_gaps(findings, rules)
+        print(render_coverage(rows)); return
 
     if args.command == "rule-test":
         result = run_rule_test(load_rule(args.rule), args.fixture)
         state = "PASS" if result.passed else "FAIL"
-        print(
-            f"{state} | {result.name} | expected={result.expected_matches} "
-            f"actual={result.actual_matches}"
-        )
+        print(f"{state} | {result.name} | expected={result.expected_matches} actual={result.actual_matches}")
         raise SystemExit(0 if result.passed else 1)
 
     if args.command == "tune":
-        suggestions = suggest_tuning(
-            load_dispositions(args.dispositions),
-            min_samples=args.min_samples,
-        )
+        suggestions = suggest_tuning(load_dispositions(args.dispositions), min_samples=args.min_samples)
         if not suggestions:
-            print("No tuning suggestions met the evidence threshold.")
-            return
+            print("No tuning suggestions met the evidence threshold."); return
         print("SOCMind Detection Tuning Suggestions")
         print("===================================")
         for item in suggestions:
-            print(
-                f"\n{item.rule_id} | false-positive-rate={item.false_positive_rate:.0%} "
-                f"| samples={item.sample_size}"
-            )
+            print(f"\n{item.rule_id} | false-positive-rate={item.false_positive_rate:.0%} | samples={item.sample_size}")
             for reason in item.common_reasons:
                 print(f"  - common benign context: {reason}")
             print(f"  Recommendation: {item.recommendation}")
+        return
+
+    if args.command == "enrich":
+        events = load_jsonl(args.events)
+        results = enrich_iocs(extract_iocs(events), [LocalIntelProvider(args.local_intel)])
+        if args.json:
+            print(json.dumps([{
+                "type": r.type,
+                "value": r.value,
+                "provider": r.provider,
+                "verdict": r.verdict,
+                "confidence": r.confidence,
+                "context": r.context,
+            } for r in results], indent=2))
+        else:
+            if not results:
+                print("No enrichment matches found.")
+            for r in results:
+                print(f"{r.type.upper():7} | {r.value} | {r.verdict} | confidence={r.confidence}% | {r.provider}")
+        return
+
+    if args.command == "note":
+        note = append_note(
+            args.journal,
+            case_id=args.case_id,
+            author=args.author,
+            text=args.text,
+            disposition=args.disposition,
+        )
+        print(f"Note appended -> {args.journal} | {note.case_id} | {note.author}")
+        return
+
+    if args.command == "escalate":
+        events = load_jsonl(args.events)
+        export_escalation_package(events, analyze(events), args.output, case_id=args.case_id)
+        print(f"Escalation package exported -> {args.output}")
         return
 
     if args.command == "ingest":
@@ -242,6 +288,10 @@ def main() -> None:
             events = parse_auditd(args.path, host=args.host)
         elif args.format == "windows-evtx":
             events = parse_evtx(args.path)
+        elif args.format == "wazuh":
+            events = parse_wazuh_alerts(args.path)
+        elif args.format == "elastic":
+            events = parse_elastic_ndjson(args.path)
         else:
             events = parse_windows_event_xml(args.path)
         _events_to_jsonl(events, args.output)
