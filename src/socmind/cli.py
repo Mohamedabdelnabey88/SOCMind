@@ -15,7 +15,7 @@ from .case import export_case
 from .audit import append_audit
 from .case_workflow import assign, load_case, new_case, save_case, transition
 from .coverage import build_coverage, detection_gaps, render_coverage
-from .command_center import command_center_snapshot, upsert_case
+from .command_center import acknowledge_case, command_center_snapshot, upsert_case
 from .detections import evaluate_rule, load_rule, load_rules
 from .engine import analyze
 from .enrichment import LocalIntelProvider, enrich_iocs
@@ -198,6 +198,10 @@ def build_parser() -> argparse.ArgumentParser:
     command_view = sub.add_parser("command-center", help="Show SOC queue, SLA and workload metrics")
     command_view.add_argument("database")
     command_view.add_argument("--json", action="store_true")
+
+    command_ack = sub.add_parser("command-ack", help="Acknowledge a case and start MTTA tracking")
+    command_ack.add_argument("database")
+    command_ack.add_argument("case_id")
 
     return parser
 
@@ -415,6 +419,11 @@ def main() -> None:
         print(f"Command center updated -> {args.database} | {case.case_id}")
         return
 
+    if args.command == "command-ack":
+        acknowledge_case(args.database, args.case_id)
+        print(f"Case acknowledged -> {args.case_id}")
+        return
+
     if args.command == "command-center":
         snapshot = command_center_snapshot(args.database)
         if args.json:
@@ -426,7 +435,9 @@ def main() -> None:
             print(
                 f"total={summary['total']} active={summary['active']} "
                 f"p1={summary['p1_active']} unassigned={summary['unassigned']} "
-                f"sla-breached={summary['sla_breached']}"
+                f"sla-breached={summary['sla_breached']} "
+                f"mtta={summary['mtta_minutes'] if summary['mtta_minutes'] is not None else '-'}m "
+                f"mttr={summary['mttr_minutes'] if summary['mttr_minutes'] is not None else '-'}m"
             )
             print("\nQueue:")
             for item in snapshot["queue"]:
