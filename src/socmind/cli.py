@@ -32,6 +32,7 @@ from .rule_tests import run_rule_test
 from .sla import evaluate_sla
 from .timeline import render_timeline
 from .tuning import load_dispositions, suggest_tuning
+from .workspace import build_workspace
 
 
 def _events_to_jsonl(events, output: str) -> None:
@@ -178,6 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
     audit_cmd.add_argument("--actor", required=True)
     audit_cmd.add_argument("--action", required=True)
     audit_cmd.add_argument("--detail", required=True)
+
+    investigate_cmd = sub.add_parser("investigate", help="Build a complete SOC investigation workspace")
+    investigate_cmd.add_argument("events")
+    investigate_cmd.add_argument("-o", "--output", required=True)
+    investigate_cmd.add_argument("--case-id", required=True)
+    investigate_cmd.add_argument("--priority", choices=["P1", "P2", "P3"], default="P2")
+    investigate_cmd.add_argument("--owner")
 
     return parser
 
@@ -365,6 +373,17 @@ def main() -> None:
             print(f"Shift handoff exported -> {args.output}")
         else:
             print(text)
+        return
+
+    if args.command == "investigate":
+        target = build_workspace(
+            args.events,
+            args.output,
+            case_id=args.case_id,
+            priority=args.priority,
+            owner=args.owner,
+        )
+        print(f"Investigation workspace -> {target}")
         return
 
     if args.command == "audit":
