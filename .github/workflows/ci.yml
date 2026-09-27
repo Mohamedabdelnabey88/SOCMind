@@ -27,6 +27,11 @@ jobs:
       - run: socmind coverage examples/attack_chain.jsonl --rules detections
       - run: socmind gaps examples/attack_chain.jsonl --rules detections
       - run: socmind tune examples/dispositions.jsonl
+      - run: socmind ingest wazuh tests/fixtures/wazuh-alerts.jsonl -o wazuh.jsonl
+      - run: socmind ingest elastic tests/fixtures/elastic-events.ndjson -o elastic.jsonl
+      - run: socmind enrich examples/attack_chain.jsonl --local-intel examples/local-intel.json
+      - run: socmind note analyst-notes.jsonl --case-id CI-001 --author ci --text "Validated test evidence" --disposition needs-review
+      - run: socmind escalate examples/attack_chain.jsonl --case-id CI-001 -o escalation.md
 
   kali:
     runs-on: ubuntu-latest
@@ -42,7 +47,15 @@ jobs:
         run: .venv/bin/pip install -e ".[sigma]" pytest
       - name: Run test suite on Kali
         run: .venv/bin/pytest -q
-      - name: Exercise Kali CLI workflow
+      - name: Exercise Kali investigation workflow
         run: .venv/bin/socmind analyze examples/linux_attack_chain.jsonl --timeline --iocs --graph --hypotheses --case-output kali-case.json --case-id CI-KALI
+      - name: Exercise Wazuh adapter on Kali
+        run: .venv/bin/socmind ingest wazuh tests/fixtures/wazuh-alerts.jsonl -o wazuh-kali.jsonl
+      - name: Exercise Elastic adapter on Kali
+        run: .venv/bin/socmind ingest elastic tests/fixtures/elastic-events.ndjson -o elastic-kali.jsonl
+      - name: Exercise enrichment on Kali
+        run: .venv/bin/socmind enrich examples/attack_chain.jsonl --local-intel examples/local-intel.json
+      - name: Exercise escalation on Kali
+        run: .venv/bin/socmind escalate examples/linux_attack_chain.jsonl --case-id CI-KALI -o kali-escalation.md
       - name: Exercise detection workflow on Kali
         run: .venv/bin/socmind coverage examples/attack_chain.jsonl --rules detections
