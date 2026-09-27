@@ -190,6 +190,7 @@ async function loadCommandCenter() {
       ["P1 Active", s.p1_active],
       ["SLA Breaches", s.sla_breached],
       ["Unassigned", s.unassigned],
+      ["MTTA", s.mtta_minutes == null ? "—" : s.mtta_minutes + "m"],
       ["MTTR", s.mttr_minutes == null ? "—" : s.mttr_minutes + "m"]
     ];
     q("#commandCards").innerHTML = metrics.map(m =>
