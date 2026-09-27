@@ -1,0 +1,5 @@
+{"rule_id":"socmind-win-powershell-hidden","disposition":"false-positive","reason":"approved admin script","user":"admin1","host":"WS-10","process":"powershell.exe"}
+{"rule_id":"socmind-win-powershell-hidden","disposition":"false-positive","reason":"approved admin script","user":"admin2","host":"WS-11","process":"powershell.exe"}
+{"rule_id":"socmind-win-powershell-hidden","disposition":"benign-positive","reason":"approved admin script","user":"admin3","host":"WS-12","process":"powershell.exe"}
+{"rule_id":"socmind-win-powershell-hidden","disposition":"true-positive","reason":"confirmed incident","user":"user1","host":"WS-20","process":"powershell.exe"}
+{"rule_id":"socmind-win-powershell-hidden","disposition":"false-positive","reason":"maintenance window","user":"admin4","host":"WS-13","process":"powershell.exe"}
