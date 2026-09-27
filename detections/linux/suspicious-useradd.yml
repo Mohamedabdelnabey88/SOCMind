@@ -1,0 +1,15 @@
+title: Suspicious Privileged Linux User Creation
+id: socmind-linux-useradd
+status: experimental
+logsource:
+  product: linux
+detection:
+  selection:
+    CommandLine|contains: useradd
+  condition: selection
+falsepositives:
+  - Approved account provisioning
+tags:
+  - attack.t1136.001
+  - attack.t1548.003
+level: medium
