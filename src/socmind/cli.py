@@ -12,19 +12,23 @@ from .adapters import (
     parse_windows_event_xml,
 )
 from .case import export_case
+from .case_workflow import assign, load_case, new_case, save_case, transition
 from .coverage import build_coverage, detection_gaps, render_coverage
 from .detections import evaluate_rule, load_rule, load_rules
 from .engine import analyze
 from .enrichment import LocalIntelProvider, enrich_iocs
 from .escalation import export_escalation_package
 from .graph import render_mermaid
+from .handoff import render_shift_handoff
 from .hypothesis import generate_hypotheses
 from .io import load_jsonl
 from .ioc import extract_iocs
 from .notes import append_note
 from .process_tree import render_process_tree
+from .provenance import fingerprint
 from .report import render_text
 from .rule_tests import run_rule_test
+from .sla import evaluate_sla
 from .timeline import render_timeline
 from .tuning import load_dispositions, suggest_tuning
 
@@ -141,6 +145,32 @@ def build_parser() -> argparse.ArgumentParser:
     web_cmd.add_argument("--case-id", default="SOCMIND-WEB")
     web_cmd.add_argument("--host", default="127.0.0.1")
     web_cmd.add_argument("--port", type=int, default=8765)
+
+    case_init = sub.add_parser("case-init", help="Create an operational SOC case record")
+    case_init.add_argument("output")
+    case_init.add_argument("--case-id", required=True)
+    case_init.add_argument("--priority", choices=["P1", "P2", "P3"], default="P3")
+    case_init.add_argument("--owner")
+
+    case_assign = sub.add_parser("case-assign", help="Assign a case to an analyst")
+    case_assign.add_argument("case_file")
+    case_assign.add_argument("--owner", required=True)
+
+    case_move = sub.add_parser("case-transition", help="Move a case through the SOC lifecycle")
+    case_move.add_argument("case_file")
+    case_move.add_argument("--state", required=True)
+
+    sla_cmd = sub.add_parser("sla", help="Evaluate the case response SLA")
+    sla_cmd.add_argument("case_file")
+
+    evidence_cmd = sub.add_parser("evidence", help="Fingerprint evidence with SHA-256")
+    evidence_cmd.add_argument("path")
+
+    handoff_cmd = sub.add_parser("handoff", help="Create a shift handoff summary")
+    handoff_cmd.add_argument("events")
+    handoff_cmd.add_argument("--case-id", required=True)
+    handoff_cmd.add_argument("-o", "--output")
+
     return parser
 
 
@@ -283,6 +313,50 @@ def main() -> None:
         events = load_jsonl(args.events)
         export_escalation_package(events, analyze(events), args.output, case_id=args.case_id)
         print(f"Escalation package exported -> {args.output}")
+        return
+
+    if args.command == "case-init":
+        case = new_case(args.case_id, priority=args.priority, owner=args.owner)
+        save_case(case, args.output)
+        print(f"Case created -> {args.output} | {case.case_id} | {case.priority}")
+        return
+
+    if args.command == "case-assign":
+        case = load_case(args.case_file)
+        assign(case, args.owner)
+        save_case(case, args.case_file)
+        print(f"Case assigned -> {case.case_id} | {case.owner}")
+        return
+
+    if args.command == "case-transition":
+        case = load_case(args.case_file)
+        transition(case, args.state)
+        save_case(case, args.case_file)
+        print(f"Case state -> {case.case_id} | {case.state}")
+        return
+
+    if args.command == "sla":
+        case = load_case(args.case_file)
+        status = evaluate_sla(case.opened_at, priority=case.priority)
+        print(
+            f"{case.case_id} | {status.priority} | elapsed={status.elapsed_minutes}m "
+            f"| target={status.target_minutes}m | breached={'yes' if status.breached else 'no'}"
+        )
+        return
+
+    if args.command == "evidence":
+        item = fingerprint(args.path)
+        print(f"SHA256 {item.sha256} | bytes={item.size_bytes} | {item.path}")
+        return
+
+    if args.command == "handoff":
+        events = load_jsonl(args.events)
+        text = render_shift_handoff(events, analyze(events), case_id=args.case_id)
+        if args.output:
+            Path(args.output).write_text(text, encoding="utf-8")
+            print(f"Shift handoff exported -> {args.output}")
+        else:
+            print(text)
         return
 
     if args.command == "web":
