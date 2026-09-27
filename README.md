@@ -1,53 +1,154 @@
 # SOCMind
 
-**SOCMind** is an open-source, cross-platform SOC Tier 1 / Tier 2 investigation toolkit for **Windows and Linux** focused on alert triage, evidence correlation, attack-story reconstruction, MITRE ATT&CK mapping, and analyst-ready reporting.
+**SOCMind** is an open-source, cross-platform investigation workbench for **SOC Tier 1 / Tier 2 analysts** on **Windows and Linux**.
 
-> Status: **v0.1 — foundation release**. SOCMind is intentionally designed as an analyst workflow engine, not another SIEM.
+It is designed around a simple idea: an alert should not end at a rule match. SOCMind turns telemetry into **explainable triage, evidence correlation, investigation timelines, MITRE ATT&CK context, escalation guidance, and analyst-ready reporting**.
 
-## Why SOCMind?
+> **v0.2 — ingestion + explainable triage**
+>
+> SOCMind is not a SIEM replacement. It is an analyst workflow and investigation layer.
 
-SOC analysts routinely pivot across authentication events, endpoint telemetry, PowerShell, SSH, privilege escalation, persistence, network activity, and threat intelligence. SOCMind turns those disconnected observations into a structured investigation while keeping the final decision with the analyst.
+## What makes it different
 
-## Cross-platform design
+Most log tools answer **"what matched?"**. SOCMind is being built to answer:
 
-SOCMind uses one normalized event model and OS-specific adapters:
+- **Why did this alert fire?**
+- **What evidence supports it?**
+- **What should Tier 1 validate next?**
+- **When should it escalate to Tier 2?**
+- **What happened before and after the alert?**
+- **Which ATT&CK techniques are represented?**
+- **Can the same investigation logic work across Windows and Linux?**
+
+## Cross-platform architecture
 
 ```text
-Windows telemetry ─┐
-  Security EVTX    │
-  Sysmon           ├──> Normalization ──> T1 Triage ──> T2 Correlation ──> Report
-  PowerShell       │
-                   │
-Linux telemetry ───┤
-  auth.log / SSH   │
-  journald         │
-  auditd           │
-  systemd / cron ──┘
+Windows                                  Linux
+├── Security Event XML                   ├── auth.log / secure
+├── Sysmon                               ├── journald
+└── PowerShell                           ├── auditd (roadmap)
+        │                                └── systemd / cron
+        └──────────────┬────────────────────────┘
+                       ▼
+             Normalized Event Model
+                       ▼
+                Detection Engine
+                       ▼
+             Evidence Correlation
+                       ▼
+          Explainable Tier-1 Triage
+                       ▼
+                 P1 / P2 / P3
+                       ▼
+             Tier-2 Investigation
+               ┌───────┴────────┐
+               ▼                ▼
+        MITRE ATT&CK        Timeline
+               └───────┬────────┘
+                       ▼
+               Analyst Report
 ```
 
-The analysis engine itself is platform-neutral Python and runs on both Windows and Linux.
+See [Architecture](docs/architecture.md).
 
-## Current v0.1 capabilities
+## Current detections
 
 ### Windows
-- Detect repeated failed logons (`4625`) followed by successful authentication (`4624`).
-- Identify suspicious PowerShell behaviors and correlate near-term outbound network activity.
-- Surface persistence-related activity such as Scheduled Task (`4698`) and Service creation (`7045`).
+
+- Repeated `4625` failures followed by `4624` success.
+- Suspicious PowerShell command-line behavior.
+- PowerShell followed by outbound network activity.
+- Scheduled Task persistence (`4698`).
+- Windows Service persistence (`7045`).
 
 ### Linux
-- Detect repeated SSH authentication failures followed by a successful login.
-- Flag high-interest privileged `sudo` commands for analyst review.
-- Surface persistence-related systemd service and cron activity.
 
-### Shared SOC workflow
-- Map findings to MITRE ATT&CK techniques.
-- Produce investigation findings with evidence, rationale, severity, and risk score.
-- Ship with sanitized Windows and Linux sample telemetry.
-- Run automated tests on both Ubuntu and Windows through GitHub Actions.
+- Repeated SSH failures followed by successful login.
+- Suspicious privileged `sudo` commands.
+- systemd persistence-related activity.
+- cron persistence model.
 
-## Quick start
+## Raw telemetry ingestion
+
+### Linux auth.log / secure
 
 ```bash
+socmind ingest linux-auth /var/log/auth.log \
+  --host web-01 --year 2026 -o normalized.jsonl
+
+socmind analyze normalized.jsonl --timeline
+```
+
+### systemd journal
+
+```bash
+journalctl -o json > journal.jsonl
+socmind ingest journald journal.jsonl -o normalized.jsonl
+socmind analyze normalized.jsonl
+```
+
+### Windows Event Viewer XML
+
+Export selected events as XML, then:
+
+```powershell
+socmind ingest windows-xml .\security-events.xml -o .\normalized.jsonl
+socmind analyze .\normalized.jsonl --timeline
+```
+
+Native binary `.evtx` support is on the next ingestion milestone; XML support keeps the current core dependency-free and cross-platform.
+
+## Explainable triage
+
+A finding is not just a severity label. SOCMind provides:
+
+```text
+HIGH | score=75 | Suspicious PowerShell execution
+
+Priority: P2
+Disposition: needs-review
+Escalation: Tier 1 validate; escalate if unexplained
+
+Why it fired:
+  - PowerShell profile loading disabled
+  - PowerShell window configured as hidden
+  - outbound connection followed execution
+
+Recommended next steps:
+  1. Inspect parent and child process ancestry.
+  2. Review PowerShell Script Block logs.
+  3. Extract domains, IPs, URLs and hashes.
+  4. Check persistence and outbound connections.
+
+MITRE:
+T1059.001 PowerShell
+```
+
+The recommendation is intentionally **analyst-in-the-loop**. SOCMind does not automatically declare an incident malicious or close a case.
+
+## Investigation case
+
+The repository ships with a portfolio case that expresses one incident pattern across both operating systems:
+
+**Case 001 — Authentication to Persistence**
+
+```text
+Windows:
+4625 → 4624 → PowerShell → Network → Scheduled Task / Service
+
+Linux:
+SSH Failures → SSH Success → sudo → systemd / cron
+```
+
+See [Case 001](docs/cases/case-001-authentication-to-persistence.md).
+
+## Install
+
+Requires Python 3.11+.
+
+```bash
+git clone https://github.com/Mohamedabdelnabey88/SOCMind.git
+cd SOCMind
 python -m venv .venv
 ```
 
@@ -56,8 +157,6 @@ Linux:
 ```bash
 source .venv/bin/activate
 pip install -e .
-socmind analyze examples/attack_chain.jsonl
-socmind analyze examples/linux_attack_chain.jsonl
 ```
 
 Windows PowerShell:
@@ -65,67 +164,63 @@ Windows PowerShell:
 ```powershell
 .\.venv\Scripts\Activate.ps1
 pip install -e .
-socmind analyze examples\attack_chain.jsonl
-socmind analyze examples\linux_attack_chain.jsonl
 ```
 
-## Analyst workflow
+Run the safe sample investigations:
 
-```text
-Alert / Telemetry
-      ↓
-Normalization
-      ↓
-Tier-1 Triage
-      ↓
-Evidence Correlation
-      ↓
-Tier-2 Investigation
-      ↓
-MITRE ATT&CK Mapping
-      ↓
-Escalation / Closure Report
+```bash
+socmind analyze examples/attack_chain.jsonl --timeline
+socmind analyze examples/linux_attack_chain.jsonl --timeline
 ```
+
+## CI quality gate
+
+Every push and pull request is tested on:
+
+- Ubuntu / Python 3.11
+- Ubuntu / Python 3.12
+- Windows / Python 3.11
+- Windows / Python 3.12
+
+CI validates package installation, byte-code compilation, automated tests, and both Windows/Linux demo investigations.
 
 ## Roadmap
 
-### v0.2 — Tier 1 ingestion
-- Native Windows EVTX adapter
-- Sysmon XML adapter
-- Linux auth.log / secure parser
-- systemd-journald JSON adapter
-- auditd parser
-- IOC extraction and enrichment interface
-- phishing triage playbook
-- analyst disposition: TP / FP / benign-positive / escalate
+### v0.3 — deeper telemetry
 
-### v0.3 — Tier 2 investigation
+- Native EVTX parser
+- Sysmon-specific normalization
+- Linux auditd parser
+- process ancestry
+- DNS / network IOC extraction
+- IOC enrichment provider interface
+
+### v0.4 — Tier 2 workbench
+
 - investigation graph
-- process ancestry correlation
-- Windows + Linux lateral movement heuristics
 - cross-source timeline reconstruction
-- hypothesis + confidence model
-- reusable investigation playbooks
+- reusable playbooks
+- case JSON export
+- hypothesis / confidence model
+- analyst notes and dispositions
 
-### v0.4 — Detection engineering
+### v0.5 — detection engineering
+
 - Sigma interoperability
 - detection-gap analysis
 - rule-test fixtures
 - false-positive tuning feedback
 
 ### v1.0
-- Web investigation workspace
+
+- web investigation workspace
+- SIEM adapters
 - case export
-- pluggable SIEM adapters
 - investigation playbook engine
 
-## Portfolio goal
+## Safety
 
-SOCMind is built to demonstrate practical SOC Tier 1 and Tier 2 engineering skills: triage, log analysis, correlation, threat investigation, MITRE ATT&CK mapping, detection logic, and incident documentation across Windows and Linux environments.
-
-## Safety and scope
-
-SOCMind is a defensive security project. Sample telemetry uses reserved documentation IP ranges and contains no real credentials, malware, or production data.
+SOCMind is a defensive Blue Team project. Repository samples are sanitized and use documentation-only IP ranges. No real credentials, malware, or production customer data are included.
 
 ## License
 
