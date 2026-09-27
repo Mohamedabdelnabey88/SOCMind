@@ -9,9 +9,13 @@ from .adapters import (
     parse_journald_json,
     parse_windows_event_xml,
 )
+from .case import export_case
 from .engine import analyze
+from .graph import render_mermaid
+from .hypothesis import generate_hypotheses
 from .io import load_jsonl
 from .ioc import extract_iocs
+from .process_tree import render_process_tree
 from .report import render_text
 from .timeline import render_timeline
 
@@ -47,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_cmd.add_argument("path", help="Path to JSONL event file")
     analyze_cmd.add_argument("--timeline", action="store_true", help="Print evidence timeline")
     analyze_cmd.add_argument("--iocs", action="store_true", help="Extract IOCs from the investigation")
+    analyze_cmd.add_argument("--graph", action="store_true", help="Print Mermaid investigation graph")
+    analyze_cmd.add_argument("--process-tree", action="store_true", help="Print process ancestry")
+    analyze_cmd.add_argument("--hypotheses", action="store_true", help="Print evidence-based hypotheses")
+    analyze_cmd.add_argument("--case-output", help="Export structured investigation case JSON")
+    analyze_cmd.add_argument("--case-id", default="SOCMIND-CASE", help="Case identifier")
 
     ingest = sub.add_parser("ingest", help="Normalize raw Windows/Linux telemetry into JSONL")
     ingest.add_argument(
@@ -64,6 +73,14 @@ def build_parser() -> argparse.ArgumentParser:
     ioc_cmd = sub.add_parser("iocs", help="Extract IP/domain/URL/hash indicators")
     ioc_cmd.add_argument("path", help="Path to normalized JSONL event file")
     ioc_cmd.add_argument("--json", action="store_true", help="Emit JSON")
+
+    graph_cmd = sub.add_parser("graph", help="Render a Mermaid investigation graph")
+    graph_cmd.add_argument("path", help="Path to normalized JSONL event file")
+
+    case_cmd = sub.add_parser("case", help="Export a structured Tier 2 case package")
+    case_cmd.add_argument("path", help="Path to normalized JSONL event file")
+    case_cmd.add_argument("-o", "--output", required=True, help="Case JSON output")
+    case_cmd.add_argument("--case-id", default="SOCMIND-CASE")
     return parser
 
 
@@ -84,18 +101,48 @@ def _print_iocs(events, as_json: bool = False) -> None:
         print(f"{ioc.type.upper():7} | {ioc.scope:8} | {ioc.value}")
 
 
+def _print_hypotheses(findings) -> None:
+    hypotheses = generate_hypotheses(findings)
+    if not hypotheses:
+        print("No investigation hypotheses generated.")
+        return
+    print("SOCMind Investigation Hypotheses")
+    print("================================")
+    for idx, item in enumerate(hypotheses, 1):
+        print(f"\n[{idx}] {item.name} | confidence={item.confidence}%")
+        print("Supporting:")
+        for value in item.supporting:
+            print(f"  + {value}")
+        print("Contradicting / validation gaps:")
+        for value in item.contradicting:
+            print(f"  - {value}")
+
+
 def main() -> None:
     args = build_parser().parse_args()
 
     if args.command == "analyze":
         events = load_jsonl(args.path)
-        print(render_text(analyze(events)))
+        findings = analyze(events)
+        print(render_text(findings))
         if args.timeline:
             print()
             print(render_timeline(events))
         if args.iocs:
             print()
             _print_iocs(events)
+        if args.graph:
+            print()
+            print(render_mermaid(events))
+        if args.process_tree:
+            print()
+            print(render_process_tree(events))
+        if args.hypotheses:
+            print()
+            _print_hypotheses(findings)
+        if args.case_output:
+            export_case(events, findings, args.case_output, case_id=args.case_id)
+            print(f"\nCase exported -> {args.case_output}")
         return
 
     if args.command == "timeline":
@@ -104,6 +151,17 @@ def main() -> None:
 
     if args.command == "iocs":
         _print_iocs(load_jsonl(args.path), as_json=args.json)
+        return
+
+    if args.command == "graph":
+        print(render_mermaid(load_jsonl(args.path)))
+        return
+
+    if args.command == "case":
+        events = load_jsonl(args.path)
+        findings = analyze(events)
+        export_case(events, findings, args.output, case_id=args.case_id)
+        print(f"Case exported -> {args.output}")
         return
 
     if args.command == "ingest":
