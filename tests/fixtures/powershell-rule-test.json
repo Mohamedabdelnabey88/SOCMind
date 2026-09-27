@@ -1,0 +1,5 @@
+{
+  "name": "hidden PowerShell matches exactly once",
+  "events": "rule-events.jsonl",
+  "expected_matches": 1
+}
