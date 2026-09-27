@@ -1,4 +1,5 @@
 let payload = null;
+let commandPayload = null;
 
 const q = s => document.querySelector(s);
 const qa = s => [...document.querySelectorAll(s)];
@@ -10,9 +11,10 @@ qa(".nav").forEach(btn => btn.addEventListener("click", () => {
   btn.classList.add("active");
   q("#" + btn.dataset.target).classList.add("active");
   if (btn.dataset.target === "graph" && payload) drawGraph(payload.graph);
+  if (btn.dataset.target === "command") loadCommandCenter();
 }));
 
-q("#refresh").addEventListener("click", load);
+q("#refresh").addEventListener("click", () => { load(); loadCommandCenter(); });
 
 function findingCard(f) {
   const reasons = f.rationale.map(x => "<li>" + esc(x) + "</li>").join("");
@@ -165,3 +167,47 @@ function drawGraph(graph) {
 }
 
 load();
+loadCommandCenter();
+
+
+async function loadCommandCenter() {
+  try {
+    const res = await fetch("/api/command-center", {cache:"no-store"});
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    commandPayload = await res.json();
+    if (!commandPayload.enabled) {
+      q("#commandState").textContent = "Database not configured";
+      q("#commandCards").innerHTML = "";
+      q("#caseQueue").innerHTML = '<tr><td colspan="5">Start the dashboard with --command-db to enable multi-case operations.</td></tr>';
+      q("#workload").innerHTML = "<div>No workload data.</div>";
+      return;
+    }
+
+    q("#commandState").textContent = "Live local queue";
+    const s = commandPayload.summary;
+    const metrics = [
+      ["Active Cases", s.active],
+      ["P1 Active", s.p1_active],
+      ["SLA Breaches", s.sla_breached],
+      ["Unassigned", s.unassigned],
+      ["MTTR", s.mttr_minutes == null ? "—" : s.mttr_minutes + "m"]
+    ];
+    q("#commandCards").innerHTML = metrics.map(m =>
+      '<div class="metric"><span>' + esc(m[0]) + '</span><b>' + esc(m[1]) + '</b></div>'
+    ).join("");
+
+    q("#caseQueue").innerHTML = commandPayload.queue.map(item => {
+      let sla = "Closed";
+      if (item.sla) sla = item.sla.breached ? '<span class="sla-breach">BREACHED</span>' : esc(item.sla.remaining_minutes + "m");
+      return '<tr><td><strong>' + esc(item.case_id) + '</strong><br><span>' + esc(item.title || "") + '</span></td>' +
+        '<td><span class="priority ' + esc(item.priority.toLowerCase()) + '">' + esc(item.priority) + '</span></td>' +
+        '<td>' + esc(item.state) + '</td><td>' + esc(item.owner || "Unassigned") + '</td><td>' + sla + '</td></tr>';
+    }).join("") || '<tr><td colspan="5">No cases registered.</td></tr>';
+
+    q("#workload").innerHTML = commandPayload.workload.map(item =>
+      '<div><b>' + esc(item.owner) + '</b><span>' + esc(item.active_cases) + ' active case(s)</span></div>'
+    ).join("") || "<div>No active analyst assignments.</div>";
+  } catch (err) {
+    q("#commandState").textContent = "Unavailable";
+  }
+}
