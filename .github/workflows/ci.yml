@@ -39,6 +39,7 @@ jobs:
       - run: socmind evidence examples/attack_chain.jsonl
       - run: socmind handoff examples/attack_chain.jsonl --case-id CI-OPS-001 -o shift-handoff.md
       - run: socmind audit analyst-audit.jsonl --case-id CI-OPS-001 --actor tier2 --action investigated --detail "Validated authentication and process evidence"
+      - run: socmind investigate examples/attack_chain.jsonl -o investigation-workspace --case-id CI-WORKSPACE-001 --priority P1 --owner tier2
 
   kali:
     runs-on: ubuntu-latest
@@ -75,6 +76,7 @@ jobs:
           .venv/bin/socmind evidence examples/linux_attack_chain.jsonl
           .venv/bin/socmind handoff examples/linux_attack_chain.jsonl --case-id KALI-OPS-001 -o kali-handoff.md
           .venv/bin/socmind audit kali-audit.jsonl --case-id KALI-OPS-001 --actor tier2 --action investigated --detail "Reviewed Linux evidence"
+          .venv/bin/socmind investigate examples/linux_attack_chain.jsonl -o kali-workspace --case-id KALI-WORKSPACE-001 --priority P1 --owner tier2
       - name: Exercise web dashboard on Kali
         shell: bash
         run: |
