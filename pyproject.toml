@@ -34,5 +34,5 @@ socmind = "socmind.cli:main"
 pythonpath = ["src"]
 testpaths = ["tests"]
 
-[tool.hatch.build]
-include = ["src/socmind/web/**"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/socmind"]
