@@ -1,0 +1,2 @@
+{"timestamp":"2026-09-28T10:00:00Z","source":"sysmon","event_id":"1","host":"WS-01","user":"analyst","process":"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe","parent_process":"winword.exe","command_line":"powershell.exe -nop -w hidden"}
+{"timestamp":"2026-09-28T10:01:00Z","source":"sysmon","event_id":"1","host":"WS-01","user":"analyst","process":"C:\\Windows\\System32\\cmd.exe","command_line":"cmd.exe /c whoami"}
