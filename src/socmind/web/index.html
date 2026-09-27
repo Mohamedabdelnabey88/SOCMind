@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SOCMind — Investigation Workbench</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">SM</div>
+        <div><strong>SOCMind</strong><span>Investigation Workbench</span></div>
+      </div>
+      <nav>
+        <button class="nav active" data-target="overview">Overview</button>
+        <button class="nav" data-target="findings">Findings</button>
+        <button class="nav" data-target="graph">Evidence Graph</button>
+        <button class="nav" data-target="timeline">Timeline</button>
+        <button class="nav" data-target="intelligence">IOCs & ATT&CK</button>
+      </nav>
+      <div class="status"><span class="dot"></span><span>Local analysis only</span></div>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">Tier 1 / Tier 2 Investigation</p>
+          <h1 id="caseTitle">Loading investigation…</h1>
+        </div>
+        <div class="header-actions">
+          <span id="health" class="pill">Connecting</span>
+          <button id="refresh">Refresh</button>
+        </div>
+      </header>
+
+      <section id="overview" class="panel page active">
+        <div id="cards" class="cards"></div>
+        <div class="grid two">
+          <article class="card">
+            <div class="card-head"><h2>Priority Findings</h2><span>Analyst queue</span></div>
+            <div id="findingPreview"></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>Investigation Hypotheses</h2><span>Evidence based</span></div>
+            <div id="hypotheses"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="findings" class="panel page">
+        <div class="section-head"><div><p class="eyebrow">Triage</p><h2>Findings</h2></div><span id="findingCount" class="pill"></span></div>
+        <div id="findingList" class="stack"></div>
+      </section>
+
+      <section id="graph" class="panel page">
+        <div class="section-head">
+          <div><p class="eyebrow">Correlation</p><h2>Interactive Evidence Graph</h2></div>
+          <div class="legend"><span>User</span><span>Host</span><span>Process</span><span>IP</span></div>
+        </div>
+        <div class="graph-wrap">
+          <svg id="evidenceGraph" viewBox="0 0 1200 620" aria-label="Evidence graph"></svg>
+          <div id="nodeDetail" class="node-detail">Click a node to inspect it.</div>
+        </div>
+      </section>
+
+      <section id="timeline" class="panel page">
+        <div class="section-head"><div><p class="eyebrow">Chronology</p><h2>Evidence Timeline</h2></div></div>
+        <div id="timelineList" class="timeline"></div>
+      </section>
+
+      <section id="intelligence" class="panel page">
+        <div class="grid two">
+          <article class="card">
+            <div class="card-head"><h2>MITRE ATT&CK</h2><span>Observed techniques</span></div>
+            <div id="techniques" class="chips"></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>Indicators</h2><span>Extracted IOCs</span></div>
+            <div id="iocs" class="stack compact"></div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/assets/app.js"></script>
+</body>
+</html>
