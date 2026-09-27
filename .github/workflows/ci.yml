@@ -32,6 +32,13 @@ jobs:
       - run: socmind enrich examples/attack_chain.jsonl --local-intel examples/local-intel.json
       - run: socmind note analyst-notes.jsonl --case-id CI-001 --author ci --text "Validated test evidence" --disposition needs-review
       - run: socmind escalate examples/attack_chain.jsonl --case-id CI-001 -o escalation.md
+      - run: socmind case-init operational-case.json --case-id CI-OPS-001 --priority P1 --owner analyst1
+      - run: socmind case-transition operational-case.json --state triage
+      - run: socmind case-assign operational-case.json --owner tier2
+      - run: socmind sla operational-case.json
+      - run: socmind evidence examples/attack_chain.jsonl
+      - run: socmind handoff examples/attack_chain.jsonl --case-id CI-OPS-001 -o shift-handoff.md
+      - run: socmind audit analyst-audit.jsonl --case-id CI-OPS-001 --actor tier2 --action investigated --detail "Validated authentication and process evidence"
 
   kali:
     runs-on: ubuntu-latest
@@ -59,6 +66,15 @@ jobs:
         run: .venv/bin/socmind escalate examples/linux_attack_chain.jsonl --case-id CI-KALI -o kali-escalation.md
       - name: Exercise detection workflow on Kali
         run: .venv/bin/socmind coverage examples/attack_chain.jsonl --rules detections
+      - name: Exercise SOC case workflow on Kali
+        run: |
+          .venv/bin/socmind case-init kali-ops.json --case-id KALI-OPS-001 --priority P1 --owner analyst1
+          .venv/bin/socmind case-transition kali-ops.json --state triage
+          .venv/bin/socmind case-assign kali-ops.json --owner tier2
+          .venv/bin/socmind sla kali-ops.json
+          .venv/bin/socmind evidence examples/linux_attack_chain.jsonl
+          .venv/bin/socmind handoff examples/linux_attack_chain.jsonl --case-id KALI-OPS-001 -o kali-handoff.md
+          .venv/bin/socmind audit kali-audit.jsonl --case-id KALI-OPS-001 --actor tier2 --action investigated --detail "Reviewed Linux evidence"
       - name: Exercise web dashboard on Kali
         shell: bash
         run: |
