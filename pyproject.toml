@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "socmind"
-version = "0.5.0"
-description = "Cross-platform SOC Tier 1/2 investigation and detection-engineering toolkit"
+version = "0.6.0"
+description = "Cross-platform SOC Tier 1/2 investigation, detection-engineering and integration toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "Mohamed Abdelnaby"}]
-keywords = ["soc", "blue-team", "dfir", "siem", "windows", "linux", "sigma", "mitre-attack"]
+keywords = ["soc", "blue-team", "dfir", "siem", "windows", "linux", "kali", "wazuh", "elastic", "sigma", "mitre-attack"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
