@@ -17,8 +17,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
-      - run: pip install -e . pytest
+      - run: pip install -e ".[sigma]" pytest
       - run: python -m compileall -q src
       - run: pytest -q
       - run: socmind analyze examples/attack_chain.jsonl --timeline --iocs --graph --process-tree --hypotheses --case-output case.json --case-id CI-WINDOWS
       - run: socmind analyze examples/linux_attack_chain.jsonl --timeline --iocs --graph --hypotheses --case-output linux-case.json --case-id CI-LINUX
+      - run: socmind detect detections/windows/suspicious-powershell.yml tests/fixtures/rule-events.jsonl
+      - run: socmind rule-test detections/windows/suspicious-powershell.yml tests/fixtures/powershell-rule-test.json
+      - run: socmind coverage examples/attack_chain.jsonl --rules detections
+      - run: socmind gaps examples/attack_chain.jsonl --rules detections
+      - run: socmind tune examples/dispositions.jsonl

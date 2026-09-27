@@ -10,6 +10,8 @@ from .adapters import (
     parse_windows_event_xml,
 )
 from .case import export_case
+from .coverage import build_coverage, detection_gaps, render_coverage
+from .detections import evaluate_rule, load_rule, load_rules
 from .engine import analyze
 from .graph import render_mermaid
 from .hypothesis import generate_hypotheses
@@ -17,7 +19,9 @@ from .io import load_jsonl
 from .ioc import extract_iocs
 from .process_tree import render_process_tree
 from .report import render_text
+from .rule_tests import run_rule_test
 from .timeline import render_timeline
+from .tuning import load_dispositions, suggest_tuning
 
 
 def _events_to_jsonl(events, output: str) -> None:
@@ -49,38 +53,58 @@ def build_parser() -> argparse.ArgumentParser:
 
     analyze_cmd = sub.add_parser("analyze", help="Analyze normalized JSONL security events")
     analyze_cmd.add_argument("path", help="Path to JSONL event file")
-    analyze_cmd.add_argument("--timeline", action="store_true", help="Print evidence timeline")
-    analyze_cmd.add_argument("--iocs", action="store_true", help="Extract IOCs from the investigation")
-    analyze_cmd.add_argument("--graph", action="store_true", help="Print Mermaid investigation graph")
-    analyze_cmd.add_argument("--process-tree", action="store_true", help="Print process ancestry")
-    analyze_cmd.add_argument("--hypotheses", action="store_true", help="Print evidence-based hypotheses")
-    analyze_cmd.add_argument("--case-output", help="Export structured investigation case JSON")
-    analyze_cmd.add_argument("--case-id", default="SOCMIND-CASE", help="Case identifier")
+    analyze_cmd.add_argument("--timeline", action="store_true")
+    analyze_cmd.add_argument("--iocs", action="store_true")
+    analyze_cmd.add_argument("--graph", action="store_true")
+    analyze_cmd.add_argument("--process-tree", action="store_true")
+    analyze_cmd.add_argument("--hypotheses", action="store_true")
+    analyze_cmd.add_argument("--case-output")
+    analyze_cmd.add_argument("--case-id", default="SOCMIND-CASE")
 
-    ingest = sub.add_parser("ingest", help="Normalize raw Windows/Linux telemetry into JSONL")
+    ingest = sub.add_parser("ingest", help="Normalize raw Windows/Linux telemetry")
     ingest.add_argument(
         "format",
         choices=["linux-auth", "journald", "auditd", "windows-xml", "windows-evtx"],
     )
-    ingest.add_argument("path", help="Input telemetry file")
-    ingest.add_argument("-o", "--output", required=True, help="Normalized JSONL output")
-    ingest.add_argument("--host", default="linux-host", help="Host name for Linux text sources")
-    ingest.add_argument("--year", type=int, help="Year for traditional syslog timestamps")
+    ingest.add_argument("path")
+    ingest.add_argument("-o", "--output", required=True)
+    ingest.add_argument("--host", default="linux-host")
+    ingest.add_argument("--year", type=int)
 
-    timeline_cmd = sub.add_parser("timeline", help="Render a normalized evidence timeline")
-    timeline_cmd.add_argument("path", help="Path to normalized JSONL event file")
+    timeline_cmd = sub.add_parser("timeline")
+    timeline_cmd.add_argument("path")
 
-    ioc_cmd = sub.add_parser("iocs", help="Extract IP/domain/URL/hash indicators")
-    ioc_cmd.add_argument("path", help="Path to normalized JSONL event file")
-    ioc_cmd.add_argument("--json", action="store_true", help="Emit JSON")
+    ioc_cmd = sub.add_parser("iocs")
+    ioc_cmd.add_argument("path")
+    ioc_cmd.add_argument("--json", action="store_true")
 
-    graph_cmd = sub.add_parser("graph", help="Render a Mermaid investigation graph")
-    graph_cmd.add_argument("path", help="Path to normalized JSONL event file")
+    graph_cmd = sub.add_parser("graph")
+    graph_cmd.add_argument("path")
 
-    case_cmd = sub.add_parser("case", help="Export a structured Tier 2 case package")
-    case_cmd.add_argument("path", help="Path to normalized JSONL event file")
-    case_cmd.add_argument("-o", "--output", required=True, help="Case JSON output")
+    case_cmd = sub.add_parser("case")
+    case_cmd.add_argument("path")
+    case_cmd.add_argument("-o", "--output", required=True)
     case_cmd.add_argument("--case-id", default="SOCMIND-CASE")
+
+    detect_cmd = sub.add_parser("detect", help="Evaluate one Sigma-style rule")
+    detect_cmd.add_argument("rule")
+    detect_cmd.add_argument("events")
+
+    coverage_cmd = sub.add_parser("coverage", help="Show ATT&CK detection coverage")
+    coverage_cmd.add_argument("events")
+    coverage_cmd.add_argument("--rules", default="detections")
+
+    gaps_cmd = sub.add_parser("gaps", help="Show observed ATT&CK techniques without local rules")
+    gaps_cmd.add_argument("events")
+    gaps_cmd.add_argument("--rules", default="detections")
+
+    rule_test_cmd = sub.add_parser("rule-test", help="Run one detection rule fixture")
+    rule_test_cmd.add_argument("rule")
+    rule_test_cmd.add_argument("fixture")
+
+    tune_cmd = sub.add_parser("tune", help="Suggest conservative false-positive tuning")
+    tune_cmd.add_argument("dispositions")
+    tune_cmd.add_argument("--min-samples", type=int, default=5)
     return parser
 
 
@@ -98,7 +122,7 @@ def _print_iocs(events, as_json: bool = False) -> None:
     print("SOCMind IOC Summary")
     print("===================")
     for ioc in iocs:
-        print(f"{ioc.type.upper():7} | {ioc.scope:8} | {ioc.value}")
+        print(f"{ioc.type.upper():7} | {ioc.scope:12} | {ioc.value}")
 
 
 def _print_hypotheses(findings) -> None:
@@ -126,20 +150,15 @@ def main() -> None:
         findings = analyze(events)
         print(render_text(findings))
         if args.timeline:
-            print()
-            print(render_timeline(events))
+            print(); print(render_timeline(events))
         if args.iocs:
-            print()
-            _print_iocs(events)
+            print(); _print_iocs(events)
         if args.graph:
-            print()
-            print(render_mermaid(events))
+            print(); print(render_mermaid(events))
         if args.process_tree:
-            print()
-            print(render_process_tree(events))
+            print(); print(render_process_tree(events))
         if args.hypotheses:
-            print()
-            _print_hypotheses(findings)
+            print(); _print_hypotheses(findings)
         if args.case_output:
             export_case(events, findings, args.case_output, case_id=args.case_id)
             print(f"\nCase exported -> {args.case_output}")
@@ -162,6 +181,56 @@ def main() -> None:
         findings = analyze(events)
         export_case(events, findings, args.output, case_id=args.case_id)
         print(f"Case exported -> {args.output}")
+        return
+
+    if args.command == "detect":
+        rule = load_rule(args.rule)
+        matches = evaluate_rule(rule, load_jsonl(args.events))
+        print(f"{rule.id} | {rule.title}")
+        print(f"matches={len(matches)} | level={rule.level} | ATT&CK={','.join(rule.attack_techniques) or '-'}")
+        for event in matches:
+            print(f"- {event.timestamp.isoformat()} | {event.host} | {event.event_id} | {event.process or '-'}")
+        return
+
+    if args.command in {"coverage", "gaps"}:
+        events = load_jsonl(args.events)
+        findings = analyze(events)
+        rules = load_rules(args.rules)
+        rows = (
+            build_coverage(findings, rules)
+            if args.command == "coverage"
+            else detection_gaps(findings, rules)
+        )
+        print(render_coverage(rows))
+        return
+
+    if args.command == "rule-test":
+        result = run_rule_test(load_rule(args.rule), args.fixture)
+        state = "PASS" if result.passed else "FAIL"
+        print(
+            f"{state} | {result.name} | expected={result.expected_matches} "
+            f"actual={result.actual_matches}"
+        )
+        raise SystemExit(0 if result.passed else 1)
+
+    if args.command == "tune":
+        suggestions = suggest_tuning(
+            load_dispositions(args.dispositions),
+            min_samples=args.min_samples,
+        )
+        if not suggestions:
+            print("No tuning suggestions met the evidence threshold.")
+            return
+        print("SOCMind Detection Tuning Suggestions")
+        print("===================================")
+        for item in suggestions:
+            print(
+                f"\n{item.rule_id} | false-positive-rate={item.false_positive_rate:.0%} "
+                f"| samples={item.sample_size}"
+            )
+            for reason in item.common_reasons:
+                print(f"  - common benign context: {reason}")
+            print(f"  Recommendation: {item.recommendation}")
         return
 
     if args.command == "ingest":

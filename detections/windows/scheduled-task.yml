@@ -1,0 +1,15 @@
+title: Windows Scheduled Task Creation
+id: socmind-win-scheduled-task
+status: experimental
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: "4698"
+  condition: selection
+falsepositives:
+  - Approved software deployment or administrative task creation
+tags:
+  - attack.t1053.005
+level: medium

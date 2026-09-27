@@ -1,0 +1,17 @@
+title: Suspicious PowerShell Hidden Window
+id: socmind-win-powershell-hidden
+status: experimental
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  selection_image:
+    Image|endswith: powershell.exe
+  selection_cmd:
+    CommandLine|contains: "-w hidden"
+  condition: selection_image and selection_cmd
+falsepositives:
+  - Administrative automation using hidden PowerShell windows
+tags:
+  - attack.t1059.001
+level: high
