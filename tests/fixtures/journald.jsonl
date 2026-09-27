@@ -1,0 +1,2 @@
+{"__REALTIME_TIMESTAMP":"1790590800000000","_HOSTNAME":"linux-01","_SYSTEMD_UNIT":"sshd.service","_COMM":"sshd","MESSAGE":"Failed password for ops from 198.51.100.23 port 52100 ssh2"}
+{"__REALTIME_TIMESTAMP":"1790590860000000","_HOSTNAME":"linux-01","_SYSTEMD_UNIT":"sshd.service","_COMM":"sshd","MESSAGE":"Accepted publickey for ops from 198.51.100.23 port 52110 ssh2"}

@@ -1,0 +1,7 @@
+Sep 28 13:00:00 linux-01 sshd[1001]: Failed password for ops from 198.51.100.23 port 52100 ssh2
+Sep 28 13:01:00 linux-01 sshd[1002]: Failed password for ops from 198.51.100.23 port 52101 ssh2
+Sep 28 13:02:00 linux-01 sshd[1003]: Failed password for ops from 198.51.100.23 port 52102 ssh2
+Sep 28 13:03:00 linux-01 sshd[1004]: Failed password for ops from 198.51.100.23 port 52103 ssh2
+Sep 28 13:04:00 linux-01 sshd[1005]: Failed password for ops from 198.51.100.23 port 52104 ssh2
+Sep 28 13:06:00 linux-01 sshd[1010]: Accepted password for ops from 198.51.100.23 port 52110 ssh2
+Sep 28 13:07:00 linux-01 sudo: ops : TTY=pts/0 ; PWD=/home/ops ; USER=root ; COMMAND=/usr/sbin/useradd backup-admin
