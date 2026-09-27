@@ -198,6 +198,63 @@ The Markdown handoff package includes:
 - reusable playbooks
 - structured case JSON
 
+## Real SOC operations
+
+SOCMind now models the operational work around an investigation, not only the technical detection.
+
+### Case lifecycle
+
+```text
+New → Triage → Investigating → Contained → Resolved
+                 └────────────→ False Positive
+```
+
+Create and assign a case:
+
+```bash
+socmind case-init case.json \
+  --case-id INC-2026-001 \
+  --priority P1 \
+  --owner analyst1
+
+socmind case-transition case.json --state triage
+socmind case-assign case.json --owner tier2-analyst
+```
+
+Check SLA:
+
+```bash
+socmind sla case.json
+```
+
+Fingerprint evidence:
+
+```bash
+socmind evidence normalized.jsonl
+```
+
+Create a shift handoff:
+
+```bash
+socmind handoff normalized.jsonl \
+  --case-id INC-2026-001 \
+  -o shift-handoff.md
+```
+
+Record analyst actions:
+
+```bash
+socmind audit analyst-audit.jsonl \
+  --case-id INC-2026-001 \
+  --actor tier2-analyst \
+  --action investigated \
+  --detail "Validated authentication, process, and network evidence."
+```
+
+These workflows demonstrate ownership, escalation discipline, SLA awareness, evidence provenance, shift continuity, and analyst accountability — the operational skills expected in a production SOC.
+
+Detailed guide: [Real SOC Workflow Model](docs/real-soc-workflow.md)
+
 ## Detection engineering
 
 SOCMind also includes:
@@ -281,7 +338,7 @@ Every pull request validates:
 - analyst workflow state
 
 ### v1.0
-- web investigation workspace
+- authenticated multi-case web investigation workspace
 - interactive evidence graph
 - case management
 - pluggable SIEM/SOAR integrations
