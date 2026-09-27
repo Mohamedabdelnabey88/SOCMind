@@ -27,3 +27,22 @@ jobs:
       - run: socmind coverage examples/attack_chain.jsonl --rules detections
       - run: socmind gaps examples/attack_chain.jsonl --rules detections
       - run: socmind tune examples/dispositions.jsonl
+
+  kali:
+    runs-on: ubuntu-latest
+    container:
+      image: kalilinux/kali-rolling
+    steps:
+      - name: Install Kali prerequisites
+        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git python3 python3-venv python3-pip
+      - uses: actions/checkout@v4
+      - name: Create isolated Kali environment
+        run: python3 -m venv .venv
+      - name: Install SOCMind in Kali venv
+        run: .venv/bin/pip install -e ".[sigma]" pytest
+      - name: Run test suite on Kali
+        run: .venv/bin/pytest -q
+      - name: Exercise Kali CLI workflow
+        run: .venv/bin/socmind analyze examples/linux_attack_chain.jsonl --timeline --iocs --graph --hypotheses --case-output kali-case.json --case-id CI-KALI
+      - name: Exercise detection workflow on Kali
+        run: .venv/bin/socmind coverage examples/attack_chain.jsonl --rules detections
