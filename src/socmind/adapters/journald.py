@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..models import Event
+
+FAILED = re.compile(r"Failed password for (?:invalid user )?(?P<user>\S+) from (?P<ip>\S+)")
+ACCEPTED = re.compile(r"Accepted (?:password|publickey) for (?P<user>\S+) from (?P<ip>\S+)")
 
 
 def _journal_timestamp(raw: dict) -> datetime:
@@ -27,12 +31,20 @@ def parse_journald_json(path: str | Path) -> list[Event]:
         host = str(raw.get("_HOSTNAME", raw.get("HOSTNAME", "linux-host")))
         unit = str(raw.get("_SYSTEMD_UNIT", ""))
         process = str(raw.get("_COMM", "")) or None
-
+        user = None
+        src_ip = None
         event_id = "journal_event"
-        if "Failed password" in msg:
+
+        failed = FAILED.search(msg)
+        accepted = ACCEPTED.search(msg)
+        if failed:
             event_id = "ssh_auth_failed"
-        elif "Accepted password" in msg or "Accepted publickey" in msg:
+            user = failed.group("user")
+            src_ip = failed.group("ip")
+        elif accepted:
             event_id = "ssh_auth_success"
+            user = accepted.group("user")
+            src_ip = accepted.group("ip")
         elif unit.endswith(".service") and ("Created symlink" in msg or "Started" in msg):
             event_id = "systemd_service_activity"
 
@@ -41,6 +53,8 @@ def parse_journald_json(path: str | Path) -> list[Event]:
             source="journald",
             event_id=event_id,
             host=host,
+            user=user,
+            src_ip=src_ip,
             process=process,
             data={"message": msg, "unit": unit},
         ))
