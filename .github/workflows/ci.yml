@@ -10,14 +10,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12"]
-    runs-on: ${{ matrix.os }}
+    runs-on: \${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: \${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[sigma]" pytest
+      - run: pip install -e ".[sigma,web]" pytest httpx
       - run: python -m compileall -q src
       - run: pytest -q
       - run: socmind analyze examples/attack_chain.jsonl --timeline --iocs --graph --process-tree --hypotheses --case-output case.json --case-id CI-WINDOWS
@@ -44,7 +44,7 @@ jobs:
       - name: Create isolated Kali environment
         run: python3 -m venv .venv
       - name: Install SOCMind in Kali venv
-        run: .venv/bin/pip install -e ".[sigma]" pytest
+        run: .venv/bin/pip install -e ".[sigma,web]" pytest httpx
       - name: Run test suite on Kali
         run: .venv/bin/pytest -q
       - name: Exercise Kali investigation workflow
@@ -59,3 +59,11 @@ jobs:
         run: .venv/bin/socmind escalate examples/linux_attack_chain.jsonl --case-id CI-KALI -o kali-escalation.md
       - name: Exercise detection workflow on Kali
         run: .venv/bin/socmind coverage examples/attack_chain.jsonl --rules detections
+      - name: Exercise web dashboard on Kali
+        shell: bash
+        run: |
+          .venv/bin/socmind web examples/linux_attack_chain.jsonl --case-id CI-KALI-WEB --host 127.0.0.1 --port 8765 > /tmp/socmind-web.log 2>&1 &
+          pid=$!
+          sleep 3
+          python3 -c "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health')); assert d['status']=='ok'"
+          kill $pid
