@@ -5,6 +5,7 @@ import json
 import ssl
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -39,6 +40,10 @@ class JSONHTTPClient:
         json_body: dict | list | None = None,
         body: bytes | None = None,
     ) -> HTTPResponse:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPClientError("Only http:// and https:// integration URLs are allowed")
+
         request_headers = {"Accept": "application/json", **(headers or {})}
         data = body
         if json_body is not None:
@@ -58,6 +63,8 @@ class JSONHTTPClient:
             raise HTTPClientError(f"HTTP {exc.code}: {detail[:500]}") from exc
         except URLError as exc:
             raise HTTPClientError(f"Connection failed: {exc.reason}") from exc
+        except OSError as exc:
+            raise HTTPClientError(f"Connection failed: {exc}") from exc
 
 
 def basic_auth(username: str, password: str) -> str:
