@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Feature Maturity Upgrade
+
+- per-technique detection timing and visibility in Investigation Replay
+- explainable rule contribution metrics
+- applicability-aware Investigation Quality Gate
+- explicit analyst-confirmation markers
+- normalized historical similarity across comparable evidence dimensions
+- similarity confidence bands and evidence-breadth reporting
+- provenance for contradiction / alternative-context evidence
+- detection-health sample sufficiency and Wilson FP-rate confidence intervals
+- SOC Lead health states: stable / watch / noisy / insufficient-data
+- web UI surfaces maturity and uncertainty signals directly
+
+
 ## Unreleased — Professional Readiness Audit
 
 - keep IRE replay/quality/reasoning usable when RBAC denies Detection What-If
