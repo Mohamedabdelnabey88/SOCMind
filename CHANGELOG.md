@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.0 — Evidence Contradiction & Case Similarity
+
+- explicit contradiction/alternative-context review
+- separate validation gaps from contradicting evidence
+- unresolved analyst questions per hypothesis
+- deterministic historical case fingerprints
+- explainable weighted case similarity
+- ATT&CK/event/process/IOC overlap explanations
+- no-attribution interpretation guardrails
+- web reasoning panels and APIs
+- guided CLI help for evidence reasoning
+
+
 ## 1.3.0 — Investigation Replay Engine
 
 - step-by-step investigation replay
