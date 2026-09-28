@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from pathlib import Path
 
 from .adapters import (
@@ -26,12 +27,15 @@ from .command_center import (
 )
 from .detections import evaluate_rule, load_rule, load_rules
 from .demo import create_demo
+from .doctor import doctor_payload, run_doctor
 from .engine import analyze
 from .enrichment import LocalIntelProvider, enrich_iocs
 from .escalation import export_escalation_package
 from .graph import render_mermaid
+from .helptext import render_help
 from .handoff import render_shift_handoff
 from .hypothesis import generate_hypotheses
+from .integrations import ElasticClient, WazuhClient, integration_check
 from .io import load_jsonl
 from .lead_metrics import lead_snapshot
 from .ioc import extract_iocs
@@ -43,6 +47,7 @@ from .rule_tests import run_rule_test
 from .sla import evaluate_sla
 from .shift_brief import render_shift_brief
 from .timeline import render_timeline
+from .threat_intel_live import MISPProvider, OpenCTIClient
 from .tuning import load_dispositions, suggest_tuning
 from .workspace import build_workspace
 
@@ -71,8 +76,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="socmind",
         description="Cross-platform SOC Tier 1/2 investigation toolkit",
+        epilog=(
+            "Start here: socmind help getting-started\n"
+            "Examples: socmind help triage | socmind help integrations | socmind demo-init -o socmind-demo"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("--version", action="version", version="SOCMind 1.1.0")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    help_cmd = sub.add_parser("help", help="Show task-oriented SOCMind help")
+    help_cmd.add_argument("topic", nargs="?")
+
+    doctor_cmd = sub.add_parser("doctor", help="Check local SOCMind installation and optional features")
+    doctor_cmd.add_argument("--json", action="store_true")
 
     analyze_cmd = sub.add_parser("analyze", help="Analyze normalized JSONL security events")
     analyze_cmd.add_argument("path")
@@ -259,6 +276,36 @@ def build_parser() -> argparse.ArgumentParser:
     demo_cmd.add_argument("--windows-events", default="examples/attack_chain.jsonl")
     demo_cmd.add_argument("--linux-events", default="examples/linux_attack_chain.jsonl")
 
+    wazuh_check = sub.add_parser("wazuh-check", help="Validate Wazuh Server API authentication/connectivity")
+    wazuh_check.add_argument("url")
+    wazuh_check.add_argument("--username")
+    wazuh_check.add_argument("--insecure", action="store_true")
+
+    wazuh_agents = sub.add_parser("wazuh-agents", help="List Wazuh agents through the live API")
+    wazuh_agents.add_argument("url")
+    wazuh_agents.add_argument("--username")
+    wazuh_agents.add_argument("--limit", type=int, default=100)
+    wazuh_agents.add_argument("--insecure", action="store_true")
+    wazuh_agents.add_argument("--json", action="store_true")
+
+    elastic_pull = sub.add_parser("elastic-pull", help="Pull live Elastic search hits to NDJSON")
+    elastic_pull.add_argument("url")
+    elastic_pull.add_argument("index")
+    elastic_pull.add_argument("-o", "--output", required=True)
+    elastic_pull.add_argument("--size", type=int, default=100)
+    elastic_pull.add_argument("--query-file")
+    elastic_pull.add_argument("--insecure", action="store_true")
+
+    misp_enrich = sub.add_parser("misp-enrich", help="Enrich extracted IOCs using a live MISP instance")
+    misp_enrich.add_argument("events")
+    misp_enrich.add_argument("url")
+    misp_enrich.add_argument("--insecure", action="store_true")
+    misp_enrich.add_argument("--json", action="store_true")
+
+    opencti_check = sub.add_parser("opencti-check", help="Validate OpenCTI GraphQL connectivity")
+    opencti_check.add_argument("url")
+    opencti_check.add_argument("--insecure", action="store_true")
+
     return parser
 
 
@@ -298,6 +345,25 @@ def _print_hypotheses(findings) -> None:
 
 def main() -> None:
     args = build_parser().parse_args()
+
+    if args.command == "help":
+        try:
+            print(render_help(args.topic))
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        return
+
+    if args.command == "doctor":
+        checks = run_doctor()
+        if args.json:
+            print(json.dumps(doctor_payload(), indent=2))
+        else:
+            print("SOCMind Doctor")
+            print("==============")
+            for item in checks:
+                state = "OK" if item.ok else "WARN"
+                print(f"[{state}] {item.name}: {item.detail}")
+        raise SystemExit(0 if all(item.ok for item in checks if item.name == "python") else 1)
 
     if args.command == "analyze":
         events = load_jsonl(args.path)
@@ -588,6 +654,80 @@ def main() -> None:
             f"--command-db {result['database']} "
             "--rules detections --dispositions examples/dispositions.jsonl"
         )
+        return
+
+    if args.command in {"wazuh-check", "wazuh-agents"}:
+        username = args.username or os.environ.get("WAZUH_API_USER")
+        password = os.environ.get("WAZUH_API_PASSWORD")
+        if not username or not password:
+            raise SystemExit("Set WAZUH_API_USER and WAZUH_API_PASSWORD (or pass --username). Password is intentionally read from the environment.")
+        client = WazuhClient(
+            args.url,
+            username=username,
+            password=password,
+            verify_tls=not args.insecure,
+        )
+        if args.command == "wazuh-check":
+            status = integration_check("wazuh", client)
+            print(f"{'OK' if status.ok else 'FAIL'} | {status.provider} | {status.detail}")
+            raise SystemExit(0 if status.ok else 1)
+        payload = client.agents(limit=args.limit)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            items = payload.get("data", {}).get("affected_items", [])
+            print(f"Wazuh agents: {len(items)}")
+            for item in items:
+                print(f"- {item.get('id', '-')} | {item.get('name', '-')} | {item.get('status', '-')}")
+        return
+
+    if args.command == "elastic-pull":
+        client = ElasticClient(
+            args.url,
+            api_key=os.environ.get("ELASTIC_API_KEY"),
+            bearer_token=os.environ.get("ELASTIC_BEARER_TOKEN"),
+            username=os.environ.get("ELASTIC_USERNAME"),
+            password=os.environ.get("ELASTIC_PASSWORD"),
+            verify_tls=not args.insecure,
+        )
+        query = None
+        if args.query_file:
+            raw = json.loads(Path(args.query_file).read_text(encoding="utf-8"))
+            query = raw.get("query", raw)
+        count = client.export_ndjson(args.index, args.output, query=query, size=args.size)
+        print(f"Elastic export -> {args.output} | hits={count}")
+        return
+
+    if args.command == "misp-enrich":
+        api_key = os.environ.get("MISP_API_KEY")
+        if not api_key:
+            raise SystemExit("Set MISP_API_KEY in the environment.")
+        provider = MISPProvider(args.url, api_key, verify_tls=not args.insecure)
+        results = enrich_iocs(extract_iocs(load_jsonl(args.events)), [provider])
+        rows = [{
+            "type": item.type,
+            "value": item.value,
+            "provider": item.provider,
+            "verdict": item.verdict,
+            "confidence": item.confidence,
+            "context": item.context,
+        } for item in results]
+        if args.json:
+            print(json.dumps(rows, indent=2))
+        else:
+            if not rows:
+                print("No MISP matches found.")
+            for row in rows:
+                print(f"{row['type'].upper():7} | {row['value']} | {row['verdict']} | {row['confidence']}% | {row['context']}")
+        return
+
+    if args.command == "opencti-check":
+        token = os.environ.get("OPENCTI_TOKEN")
+        if not token:
+            raise SystemExit("Set OPENCTI_TOKEN in the environment.")
+        client = OpenCTIClient(args.url, token, verify_tls=not args.insecure)
+        data = client.graphql("query { __typename }")
+        print(f"OK | opencti | graphql={data.get('__typename', 'reachable')}")
         return
 
     if args.command == "web":
