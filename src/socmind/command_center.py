@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .case_workflow import ALLOWED, CaseState
+from .quality_gate import normalize_checklist
 from .sla import evaluate_sla
 
 
@@ -51,6 +53,13 @@ CREATE TABLE IF NOT EXISTS case_audit (
     action TEXT NOT NULL,
     detail TEXT NOT NULL,
     timestamp TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS case_quality (
+    case_id TEXT PRIMARY KEY,
+    checklist_json TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority,state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
@@ -210,6 +219,69 @@ def add_case_note(
         )
         conn.commit()
         return int(cur.lastrowid)
+
+
+def save_case_quality(
+    db_path: str | Path,
+    case_id: str,
+    checklist: dict,
+    *,
+    actor: str,
+) -> dict:
+    normalized = normalize_checklist(checklist)
+    clean_actor = actor.strip() or "analyst"
+    if len(clean_actor) > 120:
+        raise ValueError("Actor must be 120 characters or fewer")
+    now = datetime.now(timezone.utc).isoformat()
+    payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    with connect(db_path) as conn:
+        _require_case(conn, case_id)
+        conn.execute(
+            """
+            INSERT INTO case_quality(case_id,checklist_json,updated_by,updated_at)
+            VALUES(?,?,?,?)
+            ON CONFLICT(case_id) DO UPDATE SET
+              checklist_json=excluded.checklist_json,
+              updated_by=excluded.updated_by,
+              updated_at=excluded.updated_at
+            """,
+            (case_id, payload, clean_actor, now),
+        )
+        conn.execute(
+            "INSERT INTO case_audit(case_id,actor,action,detail,timestamp) VALUES(?,?,?,?,?)",
+            (
+                case_id,
+                clean_actor,
+                "quality-checklist-updated",
+                ", ".join(
+                    f"{key}={'yes' if value else 'no'}"
+                    for key, value in sorted(normalized.items())
+                )[:500],
+                now,
+            ),
+        )
+        conn.commit()
+    return {
+        "checklist": normalized,
+        "updated_by": clean_actor,
+        "updated_at": now,
+    }
+
+
+def get_case_quality(db_path: str | Path, case_id: str) -> dict:
+    with connect(db_path) as conn:
+        _require_case(conn, case_id)
+        row = conn.execute(
+            "SELECT checklist_json,updated_by,updated_at FROM case_quality WHERE case_id=?",
+            (case_id,),
+        ).fetchone()
+    if row is None:
+        return {"checklist": {}, "updated_by": None, "updated_at": None}
+    return {
+        "checklist": normalize_checklist(json.loads(row["checklist_json"])),
+        "updated_by": row["updated_by"],
+        "updated_at": row["updated_at"],
+    }
 
 
 def case_detail(db_path: str | Path, case_id: str) -> dict:
