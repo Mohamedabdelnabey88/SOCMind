@@ -27,6 +27,7 @@ from .lead_metrics import lead_snapshot
 from .quality_gate import load_checklist, quality_payload
 from .rbac import Principal, require_permission
 from .replay import replay_payload
+from .rule_audit import rule_audit_payload
 from .similarity import similarity_payload, similarity_payload_pg
 from .whatif import compare_rule_packs
 
@@ -238,6 +239,8 @@ def create_app(
         priority: str | None = Query(default=None, max_length=10),
         state: str | None = Query(default=None, max_length=40),
         owner: str | None = Query(default=None, max_length=120),
+        limit: int = Query(default=25, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
         user: Principal = Depends(allowed("case.read")),
     ):
         if app.state.command_db is None and not app.state.postgres_dsn:
@@ -254,6 +257,8 @@ def create_app(
                 priority=priority,
                 state=state,
                 owner=owner,
+                limit=limit,
+                offset=offset,
             )
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -422,6 +427,7 @@ def create_app(
     @app.get("/api/reasoning/similar")
     def reasoning_similar(
         limit: int = Query(default=5, ge=1, le=20),
+        min_score: float = Query(default=15.0, ge=0.0, le=100.0),
         user: Principal = Depends(allowed("reasoning.read")),
     ):
         if app.state.command_db is None and not app.state.postgres_dsn:
@@ -440,6 +446,7 @@ def create_app(
                     load_jsonl(app.state.events_path),
                     app.state.postgres_dsn,
                     limit=limit,
+                    min_score=min_score,
                     exclude_case_id=app.state.case_id,
                 )
             else:
@@ -447,9 +454,17 @@ def create_app(
                     load_jsonl(app.state.events_path),
                     app.state.command_db,
                     limit=limit,
+                    min_score=min_score,
                     exclude_case_id=app.state.case_id,
                 )
             return {"enabled": True, **payload}
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/detections/audit")
+    def detections_audit(user: Principal = Depends(allowed("lead.read"))):
+        try:
+            return rule_audit_payload(app.state.rules_dir)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
