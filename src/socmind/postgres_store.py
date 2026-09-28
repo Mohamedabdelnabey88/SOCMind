@@ -17,7 +17,10 @@ def initialize_postgres(dsn: str) -> None:
     psycopg = _psycopg()
     with psycopg.connect(dsn) as conn:
         with conn.cursor() as cur:
-            cur.execute(postgres_schema())
+            for statement in postgres_schema().split(";"):
+                statement = statement.strip()
+                if statement:
+                    cur.execute(statement)
         conn.commit()
 
 
