@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Professional Readiness Audit
+
+- keep IRE replay/quality/reasoning usable when RBAC denies Detection What-If
+- add short-lived timestamped trusted-proxy signatures to reduce replay risk
+- serialize tamper-evident audit writes across concurrent workers
+- prevent retention from following symlinked artifacts outside its root
+- prevent SQLite backup self-overwrite
+- serialize PostgreSQL and SQLite case-state transitions
+- restrict live integration URLs to HTTP/HTTPS
+- normalize low-level socket failures into SOCMind HTTP client errors
+- remove obsolete client-supplied actor/author fields from web mutations
+- add regression tests for concurrency, proxy replay, URL schemes and retention boundaries
+
+
 ## 1.5.0 — Enterprise Foundation
 
 - role-based access control for viewer/analyst/senior-analyst/lead/admin
