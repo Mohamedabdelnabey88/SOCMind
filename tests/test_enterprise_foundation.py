@@ -115,6 +115,7 @@ def test_backup_and_retention_are_safe_by_default(tmp_path):
 def test_postgres_schema_contains_enterprise_tables_and_indexes():
     schema = postgres_schema()
     assert "CREATE TABLE IF NOT EXISTS cases" in schema
+    assert "CREATE TABLE IF NOT EXISTS case_quality" in schema
     assert "REFERENCES cases(case_id)" in schema
     assert "idx_cases_priority_state" in schema
 
