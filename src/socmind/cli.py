@@ -55,6 +55,7 @@ from .regression import generate_regression_package
 from .rbac import ROLE_PERMISSIONS
 from .replay import replay_payload, render_replay
 from .report import render_text
+from .rule_audit import render_rule_audit, rule_audit_payload
 from .rule_tests import run_rule_test
 from .similarity import render_similarity, similarity_payload
 from .sla import evaluate_sla
@@ -376,8 +377,16 @@ def build_parser() -> argparse.ArgumentParser:
     similar_cmd.add_argument("events")
     similar_cmd.add_argument("--database", required=True)
     similar_cmd.add_argument("--limit", type=int, default=5)
+    similar_cmd.add_argument("--min-score", type=float, default=15.0)
     similar_cmd.add_argument("--exclude-case-id")
     similar_cmd.add_argument("--json", action="store_true")
+
+    rule_audit_cmd = sub.add_parser(
+        "rule-pack-audit",
+        help="Audit detection-rule quality, metadata and duplicate IDs",
+    )
+    rule_audit_cmd.add_argument("--rules", default="detections")
+    rule_audit_cmd.add_argument("--json", action="store_true")
 
     enterprise_info = sub.add_parser("enterprise-info", help="Show enterprise roles and permissions")
     enterprise_info.add_argument("--json", action="store_true")
@@ -936,6 +945,7 @@ def main() -> None:
                     events,
                     args.database,
                     limit=args.limit,
+                    min_score=args.min_score,
                     exclude_case_id=args.exclude_case_id,
                 ),
                 indent=2,
@@ -945,9 +955,18 @@ def main() -> None:
                 events,
                 args.database,
                 limit=args.limit,
+                min_score=args.min_score,
                 exclude_case_id=args.exclude_case_id,
             ))
         return
+
+    if args.command == "rule-pack-audit":
+        payload = rule_audit_payload(args.rules)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(render_rule_audit(args.rules))
+        raise SystemExit(0 if payload["production_ready"] else 1)
 
     if args.command == "enterprise-info":
         payload = {
