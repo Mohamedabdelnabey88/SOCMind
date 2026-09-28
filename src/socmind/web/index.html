@@ -14,6 +14,7 @@
         <div><strong>SOCMind</strong><span>Investigation Workbench</span></div>
       </div>
       <nav>
+        <button class="nav" data-target="command">Command Center</button>
         <button class="nav active" data-target="overview">Overview</button>
         <button class="nav" data-target="findings">Findings</button>
         <button class="nav" data-target="graph">Evidence Graph</button>
@@ -34,6 +35,21 @@
           <button id="refresh">Refresh</button>
         </div>
       </header>
+
+      <section id="command" class="panel page">
+        <div class="section-head"><div><p class="eyebrow">SOC Operations</p><h2>Command Center</h2></div><span id="commandState" class="pill">Not configured</span></div>
+        <div id="commandCards" class="cards"></div>
+        <div class="grid two">
+          <article class="card">
+            <div class="card-head"><h2>Case Queue</h2><span>Priority / SLA / ownership</span></div>
+            <div class="table-wrap"><table><thead><tr><th>Case</th><th>Priority</th><th>State</th><th>Owner</th><th>SLA</th></tr></thead><tbody id="caseQueue"></tbody></table></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>Analyst Workload</h2><span>Active assignments</span></div>
+            <div id="workload" class="stack compact"></div>
+          </article>
+        </div>
+      </section>
 
       <section id="overview" class="panel page active">
         <div id="cards" class="cards"></div>
