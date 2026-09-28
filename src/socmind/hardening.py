@@ -25,12 +25,13 @@ def is_loopback_host(host: str) -> bool:
 def validate_web_binding(
     host: str,
     *,
-    api_token: str | None,
+    api_token: str | None = None,
+    auth_configured: bool = False,
     allow_unsafe_remote: bool = False,
 ) -> None:
     if is_loopback_host(host):
         return
-    if api_token:
+    if api_token or auth_configured:
         return
     if allow_unsafe_remote:
         return
@@ -45,20 +46,21 @@ def security_report(
     *,
     host: str = "127.0.0.1",
     api_token: str | None = None,
+    auth_configured: bool = False,
     command_db: str | Path | None = None,
 ) -> list[SecurityCheck]:
     checks = [
         SecurityCheck(
             "web-binding",
-            is_loopback_host(host) or bool(api_token),
+            is_loopback_host(host) or bool(api_token) or auth_configured,
             "loopback" if is_loopback_host(host) else (
-                "token-protected remote bind" if api_token else "remote bind without token"
+                "authenticated remote bind" if (api_token or auth_configured) else "remote bind without authentication"
             ),
         ),
         SecurityCheck(
             "api-token",
-            bool(api_token) or is_loopback_host(host),
-            "configured" if api_token else "not required for loopback-only use",
+            bool(api_token) or auth_configured or is_loopback_host(host),
+            "authentication configured" if (api_token or auth_configured) else "not required for loopback-only use",
         ),
     ]
 
