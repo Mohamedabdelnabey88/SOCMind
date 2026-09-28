@@ -24,7 +24,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v1.5 — Enterprise Foundation**
+> **v1.6 — Professional Feature Maturity**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -75,6 +75,74 @@ socmind analyze examples/linux_attack_chain.jsonl \
 ```
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
+
+## v1.6 Professional Feature Maturity
+
+v1.6 deepens existing SOCMind workflows instead of adding disconnected features.
+
+### Detection Replay is now incident-aware
+
+SOCMind now separates:
+
+- `detected` — a technique-mapped rule actually matched relevant evidence
+- `covered-not-triggered` — a rule exists for the technique but did not fire on this incident
+- `gap` — no local rule covers the observed technique
+
+It also reports first observed/detected steps, blind seconds per ATT&CK technique, and time to first meaningful detection.
+
+### Investigation quality now controls closure
+
+The Quality Gate now returns:
+
+```text
+READY
+NEEDS_REVIEW
+BLOCKED
+```
+
+Quality sign-off is stored **per case** with the authenticated actor and timestamp in SQLite or PostgreSQL.
+
+Optional enforcement:
+
+```bash
+socmind web events.jsonl \
+  --command-db socmind.db \
+  --enforce-quality-on-close
+```
+
+When enabled, `resolved` is rejected until required investigation checks pass.
+
+### Historical similarity is explainable
+
+```bash
+socmind similar-cases events.jsonl \
+  --database socmind.db \
+  --min-score 40 \
+  --limit 10
+```
+
+Results expose component scores for ATT&CK, event IDs, processes and IOCs, plus weak/moderate/strong match strength.
+
+### Case Queue pagination
+
+```bash
+socmind command-center socmind.db \
+  --priority P1 \
+  --limit 25 \
+  --offset 0
+```
+
+The Web Workspace has previous/next queue navigation and matched-result counts.
+
+### Detection Rule Pack Audit
+
+```bash
+socmind rule-pack-audit --rules detections
+```
+
+The audit checks duplicate IDs, metadata, ATT&CK tag syntax, false-positive documentation, logsource and supported condition structure. Detection What-If refuses rule packs containing audit errors.
+
+Detailed guide: [Professional Feature Maturity](docs/professional-feature-maturity.md)
 
 ## v1.5 Enterprise Foundation
 
@@ -737,6 +805,7 @@ socmind analyze normalized.jsonl \
 - [Investigation Replay Engine](docs/investigation-replay-engine.md)
 - [Evidence Contradiction & Case Similarity](docs/evidence-contradiction-case-similarity.md)
 - [Enterprise Foundation](docs/enterprise-foundation.md)
+- [Professional Feature Maturity](docs/professional-feature-maturity.md)
 
 ## CI quality gate
 
@@ -763,6 +832,8 @@ Every pull request validates:
 The initial portfolio roadmap is complete through **v1.2**. **v1.3** adds SOCMind's signature investigation-to-detection feedback loop. **v1.4** adds contradiction-aware reasoning and explainable historical case reuse.
 
 v1.5 adds the enterprise foundation: RBAC, trusted-proxy identity, PostgreSQL case storage, tamper-evident audit, backup and retention tooling.
+
+v1.6 matures the existing investigation, detection and case-operation features with per-case quality enforcement, technique-aligned replay, explainable similarity, queue pagination and rule-pack audit.
 
 Future expansion remains organization-specific:
 
