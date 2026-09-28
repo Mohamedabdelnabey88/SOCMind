@@ -201,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     web_cmd.add_argument("--auth-mode", choices=["local-token", "trusted-proxy"], default="local-token")
     web_cmd.add_argument("--api-token-role", choices=sorted(ROLE_PERMISSIONS), default="admin")
     web_cmd.add_argument("--enterprise-audit", help="Optional tamper-evident enterprise audit JSONL path")
+    web_cmd.add_argument("--enforce-quality-on-close", action="store_true", help="Block resolved transitions until the per-case investigation quality gate passes")
     web_cmd.add_argument("--allow-unsafe-remote", action="store_true", help="Explicitly allow non-loopback bind without token (isolated lab only)")
 
     case_init = sub.add_parser("case-init", help="Create an operational SOC case record")
@@ -1107,6 +1108,7 @@ def main() -> None:
             api_token_role=args.api_token_role,
             trusted_proxy_secret=trusted_proxy_secret,
             enterprise_audit_path=args.enterprise_audit,
+            enforce_quality_on_close=args.enforce_quality_on_close,
         )
         print(f"SOCMind Web -> http://{args.host}:{args.port}")
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
