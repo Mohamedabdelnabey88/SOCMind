@@ -11,6 +11,8 @@ from socmind.enterprise_command_center import (
     assign_case_pg,
     case_detail_pg,
     command_center_snapshot_pg,
+    get_case_quality_pg,
+    save_case_quality_pg,
     transition_case_pg,
     upsert_case_pg,
 )
@@ -62,13 +64,28 @@ def test_postgres_enterprise_store_round_trip():
     assert detail["notes"]
     assert detail["audit"]
 
-    snap = command_center_snapshot_pg(DSN)
+    quality = save_case_quality_pg(
+        DSN,
+        "PG-001",
+        {
+            "scope_validated": True,
+            "handoff_complete": True,
+        },
+        actor="tier2",
+    )
+    assert quality["checklist"]["scope_validated"] is True
+    stored_quality = get_case_quality_pg(DSN, "PG-001")
+    assert stored_quality["updated_by"] == "tier2"
+    assert stored_quality["checklist"]["handoff_complete"] is True
+
+    snap = command_center_snapshot_pg(DSN, limit=1, offset=0)
     assert snap["summary"]["total"] == 1
     assert snap["summary"]["p1_active"] == 1
+    assert snap["pagination"]["matched"] == 1
 
     health = postgres_health(DSN)
     assert health["ready"]
-    assert health["socmind_tables"] == 3
+    assert health["socmind_tables"] == 4
 
 
 def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):
