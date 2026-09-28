@@ -115,7 +115,7 @@ async function loadLeadHealth(){
   try{
     const res=await apiFetch("/api/lead-health");if(!res.ok)throw new Error();
     leadPayload=await res.json();q("#leadState").textContent="Detection telemetry ready";const s=leadPayload.summary;
-    const metrics=[["Rules",s.rules],["Coverage",s.coverage_percent==null?"—":s.coverage_percent+"%"],["Noisy Rules",s.noisy_rules],["Dispositions",s.dispositions],["Findings",s.findings]];
+    const metrics=[["Rules",s.rules],["Coverage",s.coverage_percent==null?"—":s.coverage_percent+"%"],["Noisy Rules",s.noisy_rules],["Watch Rules",s.watch_rules],["Insufficient Data",s.insufficient_data_rules],["Dispositions",s.dispositions],["Findings",s.findings]];
     q("#leadCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
     q("#detectionHealth").innerHTML=leadPayload.detection_health.map(item=>{
       const fp=item.false_positive_rate==null?"—":Math.round(item.false_positive_rate*100)+"% FP";
