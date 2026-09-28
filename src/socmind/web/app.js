@@ -1,5 +1,6 @@
 let payload = null;
 let commandPayload = null;
+let leadPayload = null;
 
 const q = s => document.querySelector(s);
 const qa = s => [...document.querySelectorAll(s)];
@@ -12,9 +13,10 @@ qa(".nav").forEach(btn => btn.addEventListener("click", () => {
   q("#" + btn.dataset.target).classList.add("active");
   if (btn.dataset.target === "graph" && payload) drawGraph(payload.graph);
   if (btn.dataset.target === "command") loadCommandCenter();
+  if (btn.dataset.target === "lead") loadLeadHealth();
 }));
 
-q("#refresh").addEventListener("click", () => { load(); loadCommandCenter(); });
+q("#refresh").addEventListener("click", () => { load(); loadCommandCenter(); loadLeadHealth(); });
 
 function findingCard(f) {
   const reasons = f.rationale.map(x => "<li>" + esc(x) + "</li>").join("");
@@ -168,6 +170,7 @@ function drawGraph(graph) {
 
 load();
 loadCommandCenter();
+loadLeadHealth();
 
 
 async function loadCommandCenter() {
@@ -210,5 +213,46 @@ async function loadCommandCenter() {
     ).join("") || "<div>No active analyst assignments.</div>";
   } catch (err) {
     q("#commandState").textContent = "Unavailable";
+  }
+}
+
+
+async function loadLeadHealth() {
+  try {
+    const res = await fetch("/api/lead-health", {cache:"no-store"});
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    leadPayload = await res.json();
+    q("#leadState").textContent = "Detection telemetry ready";
+    const s = leadPayload.summary;
+    const metrics = [
+      ["Rules", s.rules],
+      ["Coverage", s.coverage_percent == null ? "—" : s.coverage_percent + "%"],
+      ["Noisy Rules", s.noisy_rules],
+      ["Dispositions", s.dispositions],
+      ["Findings", s.findings]
+    ];
+    q("#leadCards").innerHTML = metrics.map(m =>
+      '<div class="metric"><span>' + esc(m[0]) + '</span><b>' + esc(m[1]) + '</b></div>'
+    ).join("");
+
+    q("#detectionHealth").innerHTML = leadPayload.detection_health.map(item => {
+      const fp = item.false_positive_rate == null ? "—" : Math.round(item.false_positive_rate * 100) + "% FP";
+      const tp = item.true_positive_rate == null ? "—" : Math.round(item.true_positive_rate * 100) + "% TP";
+      return '<div><b>' + esc(item.rule_id) + '</b><span>score ' + esc(item.score) + ' · ' + tp + ' · ' + fp + (item.noisy ? ' · NOISY' : '') + '</span></div>';
+    }).join("") || "<div>No disposition history supplied.</div>";
+
+    q("#attackCoverage").innerHTML = leadPayload.coverage.filter(x => x.observed).map(item =>
+      '<div><b>' + esc(item.technique) + '</b><span>' + (item.covered ? 'Covered · ' + esc(item.rule_count) + ' rule(s)' : 'GAP') + '</span></div>'
+    ).join("") || "<div>No observed ATT&CK techniques.</div>";
+
+    q("#topUsers").innerHTML = leadPayload.top_users.map(item =>
+      '<div><b>' + esc(item.user) + '</b><span>' + esc(item.events) + ' events</span></div>'
+    ).join("") || "<div>No user telemetry.</div>";
+
+    q("#topHosts").innerHTML = leadPayload.top_hosts.map(item =>
+      '<div><b>' + esc(item.host) + '</b><span>' + esc(item.events) + ' events</span></div>'
+    ).join("") || "<div>No host telemetry.</div>";
+  } catch (err) {
+    q("#leadState").textContent = "Unavailable";
   }
 }
