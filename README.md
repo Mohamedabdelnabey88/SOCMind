@@ -24,7 +24,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v1.2 — Hardened Portfolio Release**
+> **v1.3 — Investigation Replay Engine**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -75,6 +75,69 @@ socmind analyze examples/linux_attack_chain.jsonl \
 ```
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
+
+## v1.3 Investigation Replay Engine (IRE)
+
+SOCMind now closes the loop between incident investigation and detection engineering.
+
+```text
+Incident
+  ↓
+Investigation
+  ↓
+Investigation Replay
+  ↓
+Detection Replay
+  ↓
+Blind-Spot Analysis
+  ↓
+Detection What-If
+  ↓
+Regression Package
+  ↓
+Improved Detection Pack
+  ↺
+```
+
+Replay how evidence changed the investigation:
+
+```bash
+socmind replay examples/attack_chain.jsonl
+```
+
+Measure when the current detection pack first gained visibility:
+
+```bash
+socmind detection-replay examples/attack_chain.jsonl --rules detections
+```
+
+Compare the same incident against a proposed pack:
+
+```bash
+socmind what-if examples/attack_chain.jsonl \
+  --current-rules detections \
+  --proposed-rules examples/proposed-rules
+```
+
+Review investigation completeness without scoring the analyst:
+
+```bash
+socmind case-review examples/attack_chain.jsonl \
+  --checklist examples/quality-checklist.json
+```
+
+Turn a confirmed case into a reusable detection regression package:
+
+```bash
+socmind learn-from-case examples/attack_chain.jsonl \
+  --rules detections \
+  --case-id INC-001 \
+  -o regression-pack
+```
+
+The IRE web tab shows first detection, blind steps, incident visibility, gaps, What-If improvements, quality-gate results, and the reasoning replay timeline.
+
+Detailed guide: [Investigation Replay Engine](docs/investigation-replay-engine.md)
 
 ## v1.2 Hardening & Release Quality
 
@@ -570,6 +633,7 @@ socmind analyze normalized.jsonl \
 - [Live Integrations & CLI Help](docs/live-integrations.md)
 - [CLI Reference](docs/cli-reference.md)
 - [1.2 Hardened Portfolio Release](docs/release-v1.2.md)
+- [Investigation Replay Engine](docs/investigation-replay-engine.md)
 
 ## CI quality gate
 
@@ -593,7 +657,7 @@ Every pull request validates:
 
 ## Roadmap
 
-The initial portfolio roadmap is complete through **v1.2**.
+The initial portfolio roadmap is complete through **v1.2**. **v1.3** adds SOCMind's signature investigation-to-detection feedback loop.
 
 Future work is optional expansion rather than a prerequisite for the portfolio release:
 
