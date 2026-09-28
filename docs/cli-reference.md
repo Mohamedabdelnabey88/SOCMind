@@ -74,6 +74,19 @@ Workflow help:
 socmind help ire
 ```
 
+## Evidence reasoning
+
+```text
+contradictions
+similar-cases
+```
+
+Workflow help:
+
+```bash
+socmind help reasoning
+```
+
 ## Detection engineering
 
 ```text

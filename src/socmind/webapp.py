@@ -12,12 +12,14 @@ from .command_center import (
     transition_case,
 )
 from .dashboard import build_dashboard_payload
+from .contradiction import contradiction_payload
 from .detection_replay import detection_replay_payload
 from .detections import load_rules
 from .io import load_jsonl
 from .lead_metrics import lead_snapshot
 from .quality_gate import load_checklist, quality_payload
 from .replay import replay_payload
+from .similarity import similarity_payload
 from .whatif import compare_rule_packs
 
 
@@ -49,7 +51,7 @@ def create_app(
     assets = Path(__file__).with_name("web")
     app = FastAPI(
         title="SOCMind Real SOC Workspace",
-        version="1.3.0",
+        version="1.4.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
@@ -276,6 +278,36 @@ def create_app(
                 load_jsonl(app.state.events_path),
                 checklist=checklist,
             )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/reasoning/contradictions", dependencies=[Depends(require_token)])
+    def reasoning_contradictions():
+        try:
+            return contradiction_payload(load_jsonl(app.state.events_path))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/reasoning/similar", dependencies=[Depends(require_token)])
+    def reasoning_similar(limit: int = Query(default=5, ge=1, le=20)):
+        if app.state.command_db is None:
+            return {
+                "enabled": False,
+                "matches": [],
+                "summary": {"matches": 0, "highest_score": 0.0},
+                "interpretation": (
+                    "Similarity requires a configured command-center database "
+                    "containing evidence-linked historical cases."
+                ),
+            }
+        try:
+            payload = similarity_payload(
+                load_jsonl(app.state.events_path),
+                app.state.command_db,
+                limit=limit,
+                exclude_case_id=app.state.case_id,
+            )
+            return {"enabled": True, **payload}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 

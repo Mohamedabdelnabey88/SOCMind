@@ -17,6 +17,7 @@ from .case import export_case
 from .audit import append_audit
 from .case_workflow import assign, load_case, new_case, save_case, transition
 from .coverage import build_coverage, detection_gaps, render_coverage
+from .contradiction import contradiction_payload, render_contradictions
 from .command_center import (
     acknowledge_case,
     add_case_note,
@@ -50,6 +51,7 @@ from .regression import generate_regression_package
 from .replay import replay_payload, render_replay
 from .report import render_text
 from .rule_tests import run_rule_test
+from .similarity import render_similarity, similarity_payload
 from .sla import evaluate_sla
 from .shift_brief import render_shift_brief
 from .timeline import render_timeline
@@ -89,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="SOCMind 1.3.0")
+    parser.add_argument("--version", action="version", version="SOCMind 1.4.0")
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show task-oriented SOCMind help")
@@ -350,6 +352,23 @@ def build_parser() -> argparse.ArgumentParser:
     learn_cmd.add_argument("--rules", default="detections")
     learn_cmd.add_argument("--case-id", required=True)
     learn_cmd.add_argument("-o", "--output", required=True)
+
+    contradiction_cmd = sub.add_parser(
+        "contradictions",
+        help="Review supporting, contradicting and unresolved evidence for investigation hypotheses",
+    )
+    contradiction_cmd.add_argument("events")
+    contradiction_cmd.add_argument("--json", action="store_true")
+
+    similar_cmd = sub.add_parser(
+        "similar-cases",
+        help="Find explainable historical cases with similar evidence/behavior",
+    )
+    similar_cmd.add_argument("events")
+    similar_cmd.add_argument("--database", required=True)
+    similar_cmd.add_argument("--limit", type=int, default=5)
+    similar_cmd.add_argument("--exclude-case-id")
+    similar_cmd.add_argument("--json", action="store_true")
 
     return parser
 
@@ -859,6 +878,35 @@ def main() -> None:
             case_id=args.case_id,
         )
         print(f"Detection regression package -> {target}")
+        return
+
+    if args.command == "contradictions":
+        events = load_jsonl(args.events)
+        if args.json:
+            print(json.dumps(contradiction_payload(events), indent=2))
+        else:
+            print(render_contradictions(events))
+        return
+
+    if args.command == "similar-cases":
+        events = load_jsonl(args.events)
+        if args.json:
+            print(json.dumps(
+                similarity_payload(
+                    events,
+                    args.database,
+                    limit=args.limit,
+                    exclude_case_id=args.exclude_case_id,
+                ),
+                indent=2,
+            ))
+        else:
+            print(render_similarity(
+                events,
+                args.database,
+                limit=args.limit,
+                exclude_case_id=args.exclude_case_id,
+            ))
         return
 
     if args.command == "web":
