@@ -191,6 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     web_cmd.add_argument("--host", default="127.0.0.1")
     web_cmd.add_argument("--port", type=int, default=8765)
     web_cmd.add_argument("--command-db", help="Optional SQLite SOC command-center database")
+    web_cmd.add_argument("--postgres-dsn", help="Optional PostgreSQL enterprise case-store DSN; prefer SOCMIND_POSTGRES_DSN")
     web_cmd.add_argument("--rules", default="detections")
     web_cmd.add_argument("--dispositions")
     web_cmd.add_argument("--proposed-rules", help="Optional proposed rule pack for IRE what-if comparison")
@@ -1051,10 +1052,12 @@ def main() -> None:
             )
         except ValueError as exc:
             raise SystemExit(str(exc))
+        postgres_dsn = args.postgres_dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
         app = create_app(
             args.events,
             case_id=args.case_id,
             command_db=args.command_db,
+            postgres_dsn=postgres_dsn,
             rules_dir=args.rules,
             dispositions_path=args.dispositions,
             api_token=api_token,
