@@ -85,3 +85,14 @@ def test_what_if_can_compare_rule_packs():
     assert result.visibility_delta == 0
     assert result.blind_step_delta == 0
     assert result.newly_covered_techniques == []
+
+
+def test_proposed_pack_detects_demo_chain_earlier():
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+    current = load_rules(ROOT / "detections")
+    proposed = load_rules(ROOT / "examples/proposed-rules")
+    result = compare_rule_packs(events, current, proposed)
+    assert result.first_detection_step_improvement is not None
+    assert result.first_detection_step_improvement > 0
+    assert result.visibility_delta > 0
+    assert "T1110" in result.newly_covered_techniques
