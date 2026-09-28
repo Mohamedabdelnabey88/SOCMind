@@ -128,7 +128,7 @@ socmind web events.jsonl \
   --host 0.0.0.0
 ```
 
-Identity is mapped to RBAC roles and mutating actions use the authenticated subject as the audit actor.
+Identity is mapped to RBAC roles and mutating actions use the authenticated subject as the audit actor. Trusted-proxy signatures include a short-lived timestamp; the authenticating proxy must strip client-supplied `X-SOCMind-*` identity headers and generate fresh signed headers itself.
 
 ### Tamper-evident audit
 

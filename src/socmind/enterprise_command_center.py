@@ -93,8 +93,11 @@ def upsert_case_pg(
         conn.commit()
 
 
-def _require_case(cur, case_id: str) -> dict:
-    cur.execute("SELECT * FROM cases WHERE case_id=%s", (case_id,))
+def _require_case(cur, case_id: str, *, for_update: bool = False) -> dict:
+    sql = "SELECT * FROM cases WHERE case_id=%s"
+    if for_update:
+        sql += " FOR UPDATE"
+    cur.execute(sql, (case_id,))
     row = cur.fetchone()
     if row is None:
         raise ValueError(f"Unknown case: {case_id}")
@@ -175,7 +178,7 @@ def transition_case_pg(
     now = datetime.now(timezone.utc)
     with _connect(dsn) as conn:
         with conn.cursor() as cur:
-            row = _require_case(cur, case_id)
+            row = _require_case(cur, case_id, for_update=True)
             current = row["state"]
             if target not in ALLOWED.get(current, set()):
                 raise ValueError(f"Invalid transition: {current} -> {target}")

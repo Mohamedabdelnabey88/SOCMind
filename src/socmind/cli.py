@@ -32,7 +32,7 @@ from .detections import evaluate_rule, load_rule, load_rules
 from .demo import create_demo
 from .detection_replay import detection_replay_payload, render_detection_replay
 from .doctor import doctor_payload, run_doctor
-from .enterprise_auth import sign_trusted_proxy_identity
+from .enterprise_auth import trusted_proxy_headers
 from .enterprise_ops import backup_sqlite, postgres_schema, render_retention, retention_scan
 from .engine import analyze
 from .enrichment import LocalIntelProvider, enrich_iocs
@@ -967,7 +967,10 @@ def main() -> None:
         secret = os.environ.get("SOCMIND_TRUSTED_PROXY_SECRET")
         if not secret:
             raise SystemExit("Set SOCMIND_TRUSTED_PROXY_SECRET in the environment.")
-        print(sign_trusted_proxy_identity(secret, args.subject, args.role))
+        print(json.dumps(
+            trusted_proxy_headers(secret, args.subject, args.role),
+            indent=2,
+        ))
         return
 
     if args.command == "audit-verify":

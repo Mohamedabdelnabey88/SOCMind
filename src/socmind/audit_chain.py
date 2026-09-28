@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +22,34 @@ class AuditRecord:
     detail: str
     previous_hash: str
     entry_hash: str
+
+
+@contextmanager
+def _audit_lock(target: Path):
+    lock_path = target.with_suffix(target.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as fh:
+        if fh.seek(0, os.SEEK_END) == 0:
+            fh.write(b"0")
+            fh.flush()
+        fh.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def _canonical_payload(
@@ -81,32 +111,39 @@ def append_record(
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    previous_hash = GENESIS
-    sequence = 1
-    if target.exists():
-        lines = [line for line in target.read_text(encoding="utf-8").splitlines() if line.strip()]
-        if lines:
-            last = json.loads(lines[-1])
-            previous_hash = last["entry_hash"]
-            sequence = int(last["sequence"]) + 1
+    with _audit_lock(target):
+        previous_hash = GENESIS
+        sequence = 1
+        if target.exists():
+            lines = [
+                line
+                for line in target.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            if lines:
+                last = json.loads(lines[-1])
+                previous_hash = last["entry_hash"]
+                sequence = int(last["sequence"]) + 1
 
-    ts = timestamp or datetime.now(timezone.utc).isoformat()
-    entry_hash = hash_record(
-        sequence, ts, case_id, actor, action, detail, previous_hash
-    )
-    record = AuditRecord(
-        sequence,
-        ts,
-        case_id,
-        actor,
-        action,
-        detail,
-        previous_hash,
-        entry_hash,
-    )
-    with target.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
-    return record
+        ts = timestamp or datetime.now(timezone.utc).isoformat()
+        entry_hash = hash_record(
+            sequence, ts, case_id, actor, action, detail, previous_hash
+        )
+        record = AuditRecord(
+            sequence,
+            ts,
+            case_id,
+            actor,
+            action,
+            detail,
+            previous_hash,
+            entry_hash,
+        )
+        with target.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        return record
 
 
 def verify_chain(path: str | Path) -> tuple[bool, int, str | None]:
@@ -114,30 +151,32 @@ def verify_chain(path: str | Path) -> tuple[bool, int, str | None]:
     if not target.exists():
         return True, 0, None
 
-    previous_hash = GENESIS
-    count = 0
-    for raw in target.read_text(encoding="utf-8").splitlines():
-        if not raw.strip():
-            continue
-        count += 1
-        item = json.loads(raw)
-        if item.get("previous_hash") != previous_hash:
-            return False, count, "previous-hash mismatch"
-        expected = hash_record(
-            int(item["sequence"]),
-            item["timestamp"],
-            item["case_id"],
-            item["actor"],
-            item["action"],
-            item["detail"],
-            item["previous_hash"],
-        )
-        if not hmac_compare(item.get("entry_hash", ""), expected):
-            return False, count, "entry-hash mismatch"
-        previous_hash = item["entry_hash"]
-    return True, count, None
+    with _audit_lock(target):
+        previous_hash = GENESIS
+        count = 0
+        for raw in target.read_text(encoding="utf-8").splitlines():
+            if not raw.strip():
+                continue
+            count += 1
+            item = json.loads(raw)
+            if item.get("previous_hash") != previous_hash:
+                return False, count, "previous-hash mismatch"
+            expected = hash_record(
+                int(item["sequence"]),
+                item["timestamp"],
+                item["case_id"],
+                item["actor"],
+                item["action"],
+                item["detail"],
+                item["previous_hash"],
+            )
+            if not hmac_compare(item.get("entry_hash", ""), expected):
+                return False, count, "entry-hash mismatch"
+            previous_hash = item["entry_hash"]
+        return True, count, None
 
 
 def hmac_compare(left: str, right: str) -> bool:
     import hmac
+
     return hmac.compare_digest(left, right)

@@ -17,7 +17,7 @@ q("#setToken").addEventListener("click",()=>{
   if(value===null)return;
   apiToken=value.trim();
   if(apiToken)sessionStorage.setItem("socmindToken",apiToken);else sessionStorage.removeItem("socmindToken");
-  load();loadCommandCenter();loadLeadHealth();loadIRE();loadIRE();
+  load();loadCommandCenter();loadLeadHealth();loadIRE();
 });
 q("#refresh").addEventListener("click",()=>{load();loadCommandCenter();loadLeadHealth();loadIRE();});
 q("#applyFilters").addEventListener("click",loadCommandCenter);
@@ -106,10 +106,10 @@ async function mutateCase(path,body=null){
   if(!res.ok){const e=await res.json().catch(()=>({detail:"Request failed"}));alert(e.detail||"Request failed");return;}
   await openCase(currentCaseId);await loadCommandCenter();
 }
-q("#ackCase").addEventListener("click",()=>mutateCase("/acknowledge?actor=web-analyst"));
-q("#assignCase").addEventListener("click",()=>{const owner=q("#assignOwner").value.trim();if(owner)mutateCase("/assign",{owner,actor:"web-analyst"});});
-q("#transitionCase").addEventListener("click",()=>{const state=q("#transitionState").value;if(state)mutateCase("/transition",{state,actor:"web-analyst"});});
-q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim();if(!text)return;mutateCase("/notes",{author:q("#noteAuthor").value.trim()||"web-analyst",text}).then(()=>q("#noteText").value="");});
+q("#ackCase").addEventListener("click",()=>mutateCase("/acknowledge"));
+q("#assignCase").addEventListener("click",()=>{const owner=q("#assignOwner").value.trim();if(owner)mutateCase("/assign",{owner});});
+q("#transitionCase").addEventListener("click",()=>{const state=q("#transitionState").value;if(state)mutateCase("/transition",{state});});
+q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim();if(!text)return;mutateCase("/notes",{text}).then(()=>q("#noteText").value="");});
 
 async function loadLeadHealth(){
   try{
@@ -127,18 +127,16 @@ async function loadLeadHealth(){
 
 async function loadIRE(){
   try{
-    const [replayRes,detectionRes,whatIfRes,qualityRes,contradictionRes,similarRes]=await Promise.all([
+    const [replayRes,detectionRes,qualityRes,contradictionRes,similarRes]=await Promise.all([
       apiFetch("/api/ire/replay"),
       apiFetch("/api/ire/detection-replay"),
-      apiFetch("/api/ire/what-if"),
       apiFetch("/api/ire/quality"),
       apiFetch("/api/reasoning/contradictions"),
       apiFetch("/api/reasoning/similar")
     ]);
-    if(!replayRes.ok||!detectionRes.ok||!whatIfRes.ok||!qualityRes.ok||!contradictionRes.ok||!similarRes.ok)throw new Error("IRE API unavailable");
+    if(!replayRes.ok||!detectionRes.ok||!qualityRes.ok||!contradictionRes.ok||!similarRes.ok)throw new Error("IRE API unavailable");
     const replay=await replayRes.json();
     const detection=await detectionRes.json();
-    const whatif=await whatIfRes.json();
     const quality=await qualityRes.json();
     const contradictions=await contradictionRes.json();
     const similar=await similarRes.json();
@@ -159,15 +157,23 @@ async function loadIRE(){
       '<div><b>Covered techniques</b><span>'+esc(detection.covered_techniques.join(", ")||"—")+'</span></div>'+
       '<div><b>Detection gaps</b><span class="'+(detection.gap_techniques.length?"ire-warn":"")+'">'+esc(detection.gap_techniques.join(", ")||"None")+'</span></div>';
 
-    if(whatif.enabled){
-      const early=whatif.first_detection_step_improvement;
-      q("#ireWhatIf").innerHTML=
-        '<div><b>Earlier detection</b><span>'+(early==null?"—":esc(early)+" step(s)")+'</span></div>'+
-        '<div><b>Visibility delta</b><span class="'+(whatif.visibility_delta>0?"ire-good":"")+'">'+esc((whatif.visibility_delta>=0?"+":"")+whatif.visibility_delta)+"%</span></div>"+
-        '<div><b>Blind-step reduction</b><span class="'+(whatif.blind_step_delta>0?"ire-good":"")+'">'+esc((whatif.blind_step_delta>=0?"+":"")+whatif.blind_step_delta)+'</span></div>'+
-        '<div><b>New coverage</b><span>'+esc(whatif.newly_covered_techniques.join(", ")||"—")+'</span></div>';
+    const whatIfRes=await apiFetch("/api/ire/what-if");
+    if(whatIfRes.status===403){
+      q("#ireWhatIf").innerHTML='<div>Requires <b>detection.review</b> permission.</div>';
+    }else if(whatIfRes.ok){
+      const whatif=await whatIfRes.json();
+      if(whatif.enabled){
+        const early=whatif.first_detection_step_improvement;
+        q("#ireWhatIf").innerHTML=
+          '<div><b>Earlier detection</b><span>'+(early==null?"—":esc(early)+" step(s)")+'</span></div>'+
+          '<div><b>Visibility delta</b><span class="'+(whatif.visibility_delta>0?"ire-good":"")+'">'+esc((whatif.visibility_delta>=0?"+":"")+whatif.visibility_delta)+"%</span></div>"+
+          '<div><b>Blind-step reduction</b><span class="'+(whatif.blind_step_delta>0?"ire-good":"")+'">'+esc((whatif.blind_step_delta>=0?"+":"")+whatif.blind_step_delta)+'</span></div>'+
+          '<div><b>New coverage</b><span>'+esc(whatif.newly_covered_techniques.join(", ")||"—")+'</span></div>';
+      }else{
+        q("#ireWhatIf").innerHTML='<div>Launch with <b>--proposed-rules</b> to compare a proposed pack.</div>';
+      }
     }else{
-      q("#ireWhatIf").innerHTML='<div>Launch with <b>--proposed-rules</b> to compare a proposed pack.</div>';
+      q("#ireWhatIf").innerHTML='<div>What-If comparison unavailable.</div>';
     }
 
     q("#ireQuality").innerHTML=quality.items.map(item=>
@@ -188,7 +194,7 @@ async function loadIRE(){
     }).join("")||"<div>No hypotheses available for contradiction review.</div>";
 
     if(similar.enabled===false){
-      q("#ireSimilar").innerHTML='<div>Configure <b>--command-db</b> with evidence-linked historical cases to enable similarity.</div>';
+      q("#ireSimilar").innerHTML='<div>Configure a case store with evidence-linked historical cases to enable similarity.</div>';
     }else{
       q("#ireSimilar").innerHTML=similar.matches.map(item=>{
         const reasons=item.explanation.map(x=>'<div>'+esc(x)+'</div>').join("");

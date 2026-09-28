@@ -11,7 +11,7 @@ from socmind.command_center import upsert_case
 from socmind.enterprise_auth import (
     AuthConfig,
     authenticate,
-    sign_trusted_proxy_identity,
+    trusted_proxy_headers,
 )
 from socmind.enterprise_ops import (
     backup_sqlite,
@@ -34,17 +34,28 @@ def test_rbac_permissions_are_enforced():
 
 def test_trusted_proxy_signature_authentication():
     secret = "integration-secret"
-    signature = sign_trusted_proxy_identity(secret, "alice@example.com", "lead")
+    headers = trusted_proxy_headers(secret, "alice@example.com", "lead")
     principal = authenticate(
-        {
-            "x-socmind-user": "alice@example.com",
-            "x-socmind-role": "lead",
-            "x-socmind-signature": signature,
-        },
+        {key.lower(): value for key, value in headers.items()},
         AuthConfig(mode="trusted-proxy", trusted_proxy_secret=secret),
     )
     assert principal.subject == "alice@example.com"
     assert principal.role == "lead"
+
+
+def test_trusted_proxy_rejects_stale_replay():
+    secret = "integration-secret"
+    headers = trusted_proxy_headers(
+        secret,
+        "alice@example.com",
+        "lead",
+        timestamp=1,
+    )
+    with pytest.raises(PermissionError, match="expired"):
+        authenticate(
+            {key.lower(): value for key, value in headers.items()},
+            AuthConfig(mode="trusted-proxy", trusted_proxy_secret=secret),
+        )
 
 
 def test_tamper_evident_audit_detects_modified_record(tmp_path):
@@ -84,6 +95,21 @@ def test_backup_and_retention_are_safe_by_default(tmp_path):
     applied = retention_scan(tmp_path / "exports", days=30, apply=True)
     assert applied.deleted == 1
     assert not old.exists()
+
+    with pytest.raises(ValueError):
+        backup_sqlite(db, db)
+
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    link = tmp_path / "exports" / "outside-link.json"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        return
+    os.utime(outside, (1, 1))
+    preview = retention_scan(tmp_path / "exports", days=30)
+    assert preview.eligible == 0
+    assert outside.exists()
 
 
 def test_postgres_schema_contains_enterprise_tables_and_indexes():

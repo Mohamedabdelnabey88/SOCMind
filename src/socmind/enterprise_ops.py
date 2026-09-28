@@ -20,6 +20,8 @@ def backup_sqlite(database: str | Path, output: str | Path) -> Path:
     if not source.is_file():
         raise FileNotFoundError(source)
     target = Path(output)
+    if source.resolve() == target.resolve():
+        raise ValueError("Backup destination must be different from the source database")
     target.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(str(source)) as source_conn:
         with sqlite3.connect(str(target)) as target_conn:
@@ -35,18 +37,26 @@ def retention_scan(
     suffixes: tuple[str, ...] = (".jsonl", ".json", ".md"),
 ) -> RetentionResult:
     root = Path(directory)
+    if not root.is_dir():
+        raise NotADirectoryError(root)
+    root_resolved = root.resolve()
     cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))
     scanned = eligible = deleted = 0
 
     for path in root.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in suffixes:
+        if path.is_symlink() or not path.is_file() or path.suffix.lower() not in suffixes:
+            continue
+        try:
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(root_resolved)
+        except (FileNotFoundError, ValueError):
             continue
         scanned += 1
-        modified = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+        modified = datetime.fromtimestamp(resolved.stat().st_mtime, timezone.utc)
         if modified < cutoff:
             eligible += 1
             if apply:
-                path.unlink()
+                resolved.unlink()
                 deleted += 1
 
     return RetentionResult(scanned, eligible, deleted, not apply)

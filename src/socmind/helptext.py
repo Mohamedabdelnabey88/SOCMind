@@ -179,6 +179,7 @@ PostgreSQL:
 Trusted reverse-proxy identity:
   export SOCMIND_TRUSTED_PROXY_SECRET='shared-secret'
   socmind trusted-sign --subject analyst@example.com --role analyst
+  # prints X-SOCMind-User / Role / Timestamp / Signature test headers
 
 Tamper-evident audit:
   socmind audit-verify enterprise-audit.jsonl
@@ -197,7 +198,7 @@ Enterprise web example:
     --auth-mode trusted-proxy --enterprise-audit enterprise-audit.jsonl \
     --host 0.0.0.0
 
-The trusted-proxy mode is designed for deployment behind an authenticating reverse proxy / identity-aware gateway.
+The trusted-proxy mode is designed for deployment behind an authenticating reverse proxy / identity-aware gateway. The proxy must strip client-supplied X-SOCMind-* identity headers and generate fresh signed headers.
 """,
     "demo": """SOCMind Portfolio Demo
 
