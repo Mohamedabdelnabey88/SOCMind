@@ -92,10 +92,11 @@ Expected headers:
 ```text
 X-SOCMind-User
 X-SOCMind-Role
+X-SOCMind-Timestamp
 X-SOCMind-Signature
 ```
 
-The signature covers the subject and role. Unsigned or modified identity headers are rejected.
+The signature covers the subject, role, and Unix timestamp. Signatures older than the configured short validity window are rejected to reduce replay risk.
 
 Generate a signature for lab/integration testing:
 
@@ -106,6 +107,8 @@ socmind trusted-sign \
 ```
 
 This is a **trusted reverse-proxy integration mode**, not a replacement for an identity provider. Production environments should terminate identity at an authenticating proxy or gateway backed by the organization's SSO/OIDC/SAML solution.
+
+The proxy must strip any client-supplied `X-SOCMind-*` identity headers and generate fresh signed headers itself. The signing secret must never be exposed to analyst browsers.
 
 ## PostgreSQL case store
 
