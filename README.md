@@ -22,7 +22,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v0.9 — SOC Lead & Detection Health**
+> **v1.0 — Real SOC Workspace**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -73,6 +73,62 @@ socmind analyze examples/linux_attack_chain.jsonl \
 ```
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
+
+## v1.0 Real SOC Workspace
+
+v1.0 turns SOCMind into an interactive local SOC workspace rather than a read-only dashboard.
+
+### Interactive operations
+
+- search/filter the multi-case queue
+- open a case from the queue
+- inspect linked evidence
+- acknowledge a case
+- assign/reassign an analyst
+- transition case state
+- write analyst notes
+- review the audit trail
+- preserve MTTA/MTTR/SLA metrics
+- optional API token protection
+
+### Fast recruiter / interview demo
+
+```bash
+socmind demo-init -o socmind-demo
+```
+
+Then launch:
+
+```bash
+socmind web examples/attack_chain.jsonl \
+  --case-id DEMO-P1-001 \
+  --command-db socmind-demo/socmind-demo.db \
+  --rules detections \
+  --dispositions examples/dispositions.jsonl
+```
+
+Open:
+
+```text
+http://127.0.0.1:8765
+```
+
+The demo creates three realistic cases: active P1, unassigned P2, and a resolved P3, with linked Windows/Linux evidence and analyst notes.
+
+### Optional API protection
+
+For a protected local/API demo:
+
+```bash
+socmind web examples/attack_chain.jsonl \
+  --case-id DEMO-P1-001 \
+  --command-db socmind-demo/socmind-demo.db \
+  --api-token "change-this-token"
+```
+
+Use the **API Token** button in the UI to enter the token. The token is kept only in browser session storage.
+
+Detailed guide: [v1.0 Real SOC Workspace](docs/v1-real-soc-workspace.md)
 
 ## Web Investigation Dashboard
 
@@ -399,6 +455,7 @@ socmind analyze normalized.jsonl \
 - [Portfolio / Interview Story](docs/portfolio-story.md)
 - [SOC Command Center](docs/soc-command-center.md)
 - [SOC Lead & Detection Health](docs/soc-lead-detection-health.md)
+- [v1.0 Real SOC Workspace](docs/v1-real-soc-workspace.md)
 
 ## CI quality gate
 
@@ -436,11 +493,11 @@ Every pull request validates:
 - ticketing adapters
 - analyst workflow state
 
-### v1.0
-- authenticated multi-case web investigation workspace
-- interactive evidence graph
-- case management
-- pluggable SIEM/SOAR integrations
+### Post-1.0 roadmap
+- live Wazuh / Elastic API connectors
+- MISP / OpenCTI integrations
+- ticketing / SOAR connectors
+- organization-specific RBAC and identity integration
 
 ## Safety
 

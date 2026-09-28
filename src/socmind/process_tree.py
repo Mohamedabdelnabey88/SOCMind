@@ -25,7 +25,7 @@ def render_process_tree(events: list[Event]) -> str:
         lines.append(f"{prefix}{node}")
         kids = sorted(children.get(node, []))
         for idx, child in enumerate(kids):
-            connector = "\-- " if idx == len(kids) - 1 else "|-- "
+            connector = "\\-- " if idx == len(kids) - 1 else "|-- "
             walk(child, prefix + connector)
 
     for root in roots:

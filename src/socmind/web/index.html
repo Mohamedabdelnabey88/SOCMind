@@ -33,6 +33,7 @@
         </div>
         <div class="header-actions">
           <span id="health" class="pill">Connecting</span>
+          <button id="setToken">API Token</button>
           <button id="refresh">Refresh</button>
         </div>
       </header>
@@ -43,6 +44,12 @@
         <div class="grid two">
           <article class="card">
             <div class="card-head"><h2>Case Queue</h2><span>Priority / SLA / ownership</span></div>
+            <div class="filters">
+              <input id="caseSearch" placeholder="Search case, title, source">
+              <select id="priorityFilter"><option value="">All priorities</option><option>P1</option><option>P2</option><option>P3</option></select>
+              <select id="stateFilter"><option value="">All states</option><option>new</option><option>triage</option><option>investigating</option><option>contained</option><option>resolved</option><option>false-positive</option></select>
+              <button id="applyFilters">Apply</button>
+            </div>
             <div class="table-wrap"><table><thead><tr><th>Case</th><th>Priority</th><th>State</th><th>Owner</th><th>SLA</th></tr></thead><tbody id="caseQueue"></tbody></table></div>
           </article>
           <article class="card">
@@ -50,6 +57,31 @@
             <div id="workload" class="stack compact"></div>
           </article>
         </div>
+        <article id="caseDetailPanel" class="card case-detail hidden">
+          <div class="card-head"><div><p class="eyebrow">Case Workspace</p><h2 id="detailTitle">Case Detail</h2></div><button id="closeDetail">Close</button></div>
+          <div id="detailMeta" class="detail-meta"></div>
+          <div class="case-actions">
+            <input id="assignOwner" placeholder="Assign analyst">
+            <button id="assignCase">Assign</button>
+            <button id="ackCase">Acknowledge</button>
+            <select id="transitionState">
+              <option value="">Transition…</option>
+              <option value="triage">triage</option>
+              <option value="investigating">investigating</option>
+              <option value="contained">contained</option>
+              <option value="resolved">resolved</option>
+              <option value="false-positive">false-positive</option>
+            </select>
+            <button id="transitionCase">Apply State</button>
+          </div>
+          <div class="grid two detail-grid">
+            <div><h3>Analyst Notes</h3><div id="caseNotes" class="stack compact"></div>
+              <div class="note-form"><input id="noteAuthor" value="web-analyst" placeholder="Author"><textarea id="noteText" placeholder="Investigation note"></textarea><button id="addNote">Add Note</button></div>
+            </div>
+            <div><h3>Audit Trail</h3><div id="caseAudit" class="stack compact"></div></div>
+          </div>
+          <div id="linkedInvestigation" class="linked-investigation"></div>
+        </article>
       </section>
 
       <section id="lead" class="panel page">
