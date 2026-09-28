@@ -16,6 +16,7 @@
       <nav>
         <button class="nav" data-target="command">Command Center</button>
         <button class="nav" data-target="lead">SOC Lead</button>
+        <button class="nav" data-target="ire">Investigation Replay</button>
         <button class="nav active" data-target="overview">Overview</button>
         <button class="nav" data-target="findings">Findings</button>
         <button class="nav" data-target="graph">Evidence Graph</button>
@@ -94,6 +95,34 @@
         <div class="grid two" style="margin-top:16px">
           <article class="card"><div class="card-head"><h2>Top Users</h2><span>Event concentration</span></div><div id="topUsers" class="stack compact"></div></article>
           <article class="card"><div class="card-head"><h2>Top Hosts</h2><span>Event concentration</span></div><div id="topHosts" class="stack compact"></div></article>
+        </div>
+      </section>
+
+      <section id="ire" class="panel page">
+        <div class="section-head">
+          <div><p class="eyebrow">SOCMind Signature Engine</p><h2>Investigation Replay Engine</h2></div>
+          <span id="ireState" class="pill">Loading</span>
+        </div>
+        <div id="ireCards" class="cards"></div>
+        <div class="grid two">
+          <article class="card">
+            <div class="card-head"><h2>Detection Replay</h2><span>Visibility / blind spots</span></div>
+            <div id="ireDetection" class="stack compact"></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>What-If Improvement</h2><span>Current vs proposed rules</span></div>
+            <div id="ireWhatIf" class="stack compact"></div>
+          </article>
+        </div>
+        <div class="grid two" style="margin-top:16px">
+          <article class="card">
+            <div class="card-head"><h2>Investigation Quality Gate</h2><span>Completeness, not analyst scoring</span></div>
+            <div id="ireQuality" class="stack compact"></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>Replay Timeline</h2><span>How reasoning evolved</span></div>
+            <div id="ireReplay" class="ire-replay"></div>
+          </article>
         </div>
       </section>
 
