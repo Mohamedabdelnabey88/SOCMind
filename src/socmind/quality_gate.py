@@ -74,18 +74,7 @@ def review_investigation(
         "Persistence" in finding.title for finding in findings
     )
     scope_validated = bool(checklist.get("scope_validated"))
-    has_scope_context = (
-        len({event.host for event in events if event.host}) > 1
-        or scope_validated
-    )
-    contradiction_reviewed = bool(
-        contradictions["summary"]["hypotheses"]
-        and (
-            contradictions["summary"]["contradicting_points"] > 0
-            or contradictions["summary"]["validation_gaps"] > 0
-            or checklist.get("contradictions_reviewed")
-        )
-    )
+    contradiction_reviewed = bool(checklist.get("contradictions_reviewed"))
 
     items = [
         _item(
@@ -105,13 +94,18 @@ def review_investigation(
         _item(
             "process_ancestry",
             "Process ancestry reviewed",
-            has_process_ancestry or bool(checklist.get("process_ancestry_reviewed")),
+            (not has_process_ancestry)
+            or bool(checklist.get("process_ancestry_reviewed")),
             (
-                "parent/child process evidence present"
-                if has_process_ancestry
-                else "no parent/child process pair; analyst review not recorded"
+                "parent/child process evidence present and analyst review recorded"
+                if has_process_ancestry and checklist.get("process_ancestry_reviewed")
+                else (
+                    "parent/child process evidence present but review not recorded"
+                    if has_process_ancestry
+                    else "no parent/child process pair; not applicable"
+                )
             ),
-            "advisory",
+            "conditional" if has_process_ancestry else "advisory",
         ),
         _item(
             "iocs",
@@ -170,11 +164,13 @@ def review_investigation(
         _item(
             "scope",
             "Scope validation",
-            has_scope_context,
+            scope_validated,
             (
-                "multi-host evidence or analyst scope validation recorded"
-                if has_scope_context
-                else "single-host evidence; scope validation not recorded"
+                "analyst scope validation recorded"
+                if scope_validated
+                else (
+                    f"scope validation not recorded; evidence spans {len({event.host for event in events if event.host})} host(s)"
+                )
             ),
             "required",
         ),
