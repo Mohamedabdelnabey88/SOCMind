@@ -31,6 +31,8 @@ jobs:
       - run: socmind rule-test detections/windows/suspicious-powershell.yml tests/fixtures/powershell-rule-test.json
       - run: socmind coverage examples/attack_chain.jsonl --rules detections
       - run: socmind gaps examples/attack_chain.jsonl --rules detections
+      - run: socmind rule-pack-audit --rules detections --json
+      - run: socmind rule-pack-audit --rules examples/proposed-rules --json
       - run: socmind tune examples/dispositions.jsonl
       - run: socmind ingest wazuh tests/fixtures/wazuh-alerts.jsonl -o wazuh.jsonl
       - run: socmind ingest elastic tests/fixtures/elastic-events.ndjson -o elastic.jsonl
@@ -48,6 +50,7 @@ jobs:
       - run: socmind command-register socmind.db operational-case.json --source wazuh --title "CI authentication case"
       - run: socmind command-ack socmind.db CI-OPS-001
       - run: socmind command-center socmind.db
+      - run: socmind command-center socmind.db --limit 1 --offset 0 --json
       - run: socmind lead-health examples/attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl
       - run: socmind shift-brief socmind.db examples/attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl -o ci-shift-brief.md
       - run: socmind command-register socmind.db operational-case.json --source wazuh --title "Linked evidence case" --events examples/attack_chain.jsonl
@@ -115,6 +118,7 @@ jobs:
           .venv/bin/socmind command-register kali-soc.db kali-ops.json --source elastic --title "Kali Linux investigation"
           .venv/bin/socmind command-ack kali-soc.db KALI-OPS-001
           .venv/bin/socmind command-center kali-soc.db
+          .venv/bin/socmind command-center kali-soc.db --limit 1 --offset 0 --json
           .venv/bin/socmind lead-health examples/linux_attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl
           .venv/bin/socmind shift-brief kali-soc.db examples/linux_attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl -o kali-shift-brief.md
           .venv/bin/socmind command-register kali-soc.db kali-ops.json --source elastic --title "Linked Kali evidence" --events examples/linux_attack_chain.jsonl
@@ -164,6 +168,7 @@ jobs:
       - run: wheel-venv/bin/socmind help getting-started
       - run: wheel-venv/bin/socmind help ire
       - run: wheel-venv/bin/socmind detection-replay examples/attack_chain.jsonl --rules detections --json
+      - run: wheel-venv/bin/socmind rule-pack-audit --rules detections --json
       - run: wheel-venv/bin/socmind contradictions examples/attack_chain.jsonl --json
       - run: wheel-venv/bin/socmind help enterprise
       - run: wheel-venv/bin/socmind enterprise-info --json
