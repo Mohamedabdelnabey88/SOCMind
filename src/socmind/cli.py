@@ -25,6 +25,7 @@ from .command_center import (
     upsert_case,
 )
 from .detections import evaluate_rule, load_rule, load_rules
+from .demo import create_demo
 from .engine import analyze
 from .enrichment import LocalIntelProvider, enrich_iocs
 from .escalation import export_escalation_package
@@ -252,6 +253,11 @@ def build_parser() -> argparse.ArgumentParser:
     brief_cmd.add_argument("--rules", default="detections")
     brief_cmd.add_argument("--dispositions")
     brief_cmd.add_argument("-o", "--output")
+
+    demo_cmd = sub.add_parser("demo-init", help="Create a ready-to-run SOCMind demo environment")
+    demo_cmd.add_argument("-o", "--output", default="socmind-demo")
+    demo_cmd.add_argument("--windows-events", default="examples/attack_chain.jsonl")
+    demo_cmd.add_argument("--linux-events", default="examples/linux_attack_chain.jsonl")
 
     return parser
 
@@ -567,6 +573,21 @@ def main() -> None:
             print(f"Shift brief exported -> {args.output}")
         else:
             print(text)
+        return
+
+    if args.command == "demo-init":
+        result = create_demo(
+            args.output,
+            windows_events=args.windows_events,
+            linux_events=args.linux_events,
+        )
+        print(f"Demo database -> {result['database']}")
+        print(
+            "Launch -> socmind web "
+            f"{result['events']} --case-id {result['case_id']} "
+            f"--command-db {result['database']} "
+            "--rules detections --dispositions examples/dispositions.jsonl"
+        )
         return
 
     if args.command == "web":
