@@ -77,7 +77,7 @@ q("#setToken").addEventListener("click",()=>{
   if(value===null)return;
   apiToken=value.trim();
   if(apiToken)sessionStorage.setItem("socmindToken",apiToken);else sessionStorage.removeItem("socmindToken");
-  loadIdentity();loadIdentity();load();loadCommandCenter();loadLeadHealth();loadIRE();
+  loadIdentity();load();loadCommandCenter();loadLeadHealth();loadIRE();
 });
 q("#refresh").addEventListener("click",()=>{load();loadCommandCenter();loadLeadHealth();loadIRE();});
 q("#applyFilters").addEventListener("click",()=>{queueOffset=0;loadCommandCenter();});\nq("#queuePrev").addEventListener("click",()=>{queueOffset=Math.max(0,queueOffset-queueLimit);loadCommandCenter();});\nq("#queueNext").addEventListener("click",()=>{if(commandPayload?.pagination?.has_more){queueOffset+=queueLimit;loadCommandCenter();}});
@@ -294,4 +294,4 @@ function drawGraph(graph){
   function render(){[...svg.querySelectorAll(".node")].forEach(g=>{const n=map.get(g.dataset.id);g.setAttribute("transform","translate("+n.x+" "+n.y+")");});[...svg.querySelectorAll(".edge")].forEach(l=>{const a=map.get(l.dataset.a),b=map.get(l.dataset.b);l.setAttribute("x1",a.x);l.setAttribute("y1",a.y);l.setAttribute("x2",b.x);l.setAttribute("y2",b.y);});[...svg.querySelectorAll(".edge-label")].forEach(t=>{const a=map.get(t.dataset.a),b=map.get(t.dataset.b);t.setAttribute("x",(a.x+b.x)/2);t.setAttribute("y",(a.y+b.y)/2);});}render();
 }
 
-load();loadCommandCenter();loadLeadHealth();
+loadIdentity();load();loadCommandCenter();loadLeadHealth();
