@@ -87,6 +87,25 @@
             <div><h3>Audit Trail</h3><div id="caseAudit" class="stack compact"></div></div>
           </div>
           <div id="linkedInvestigation" class="linked-investigation"></div>
+          <div class="grid two detail-grid" style="margin-top:16px">
+            <div>
+              <h3>Investigation Quality Sign-off</h3>
+              <div id="caseQualityChecklist" class="quality-checklist">
+                <label><input type="checkbox" data-quality="iocs_reviewed"> IOC review completed</label>
+                <label><input type="checkbox" data-quality="process_ancestry_reviewed"> Process ancestry reviewed</label>
+                <label><input type="checkbox" data-quality="contradictions_reviewed"> Contradictions / validation gaps reviewed</label>
+                <label><input type="checkbox" data-quality="persistence_validated"> Persistence validated</label>
+                <label><input type="checkbox" data-quality="scope_validated"> Scope validated</label>
+                <label><input type="checkbox" data-quality="detection_feedback"> Detection feedback completed</label>
+                <label><input type="checkbox" data-quality="handoff_complete"> Handoff complete</label>
+              </div>
+              <button id="saveQuality">Save Quality Sign-off</button>
+            </div>
+            <div>
+              <h3>Closure Readiness</h3>
+              <div id="caseQualityStatus" class="stack compact"></div>
+            </div>
+          </div>
         </article>
       </section>
 
