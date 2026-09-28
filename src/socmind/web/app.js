@@ -117,7 +117,12 @@ async function loadLeadHealth(){
     leadPayload=await res.json();q("#leadState").textContent="Detection telemetry ready";const s=leadPayload.summary;
     const metrics=[["Rules",s.rules],["Coverage",s.coverage_percent==null?"—":s.coverage_percent+"%"],["Noisy Rules",s.noisy_rules],["Dispositions",s.dispositions],["Findings",s.findings]];
     q("#leadCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
-    q("#detectionHealth").innerHTML=leadPayload.detection_health.map(item=>{const fp=item.false_positive_rate==null?"—":Math.round(item.false_positive_rate*100)+"% FP";const tp=item.true_positive_rate==null?"—":Math.round(item.true_positive_rate*100)+"% TP";return '<div><b>'+esc(item.rule_id)+'</b><span>score '+esc(item.score)+' · '+tp+' · '+fp+(item.noisy?' · NOISY':'')+'</span></div>';}).join("")||"<div>No disposition history.</div>";
+    q("#detectionHealth").innerHTML=leadPayload.detection_health.map(item=>{
+      const fp=item.false_positive_rate==null?"—":Math.round(item.false_positive_rate*100)+"% FP";
+      const tp=item.true_positive_rate==null?"—":Math.round(item.true_positive_rate*100)+"% TP";
+      const interval=(item.false_positive_rate_low==null||item.false_positive_rate_high==null)?"":(" · FP 95% CI "+Math.round(item.false_positive_rate_low*100)+"–"+Math.round(item.false_positive_rate_high*100)+"%");
+      return '<div><b>'+esc(item.rule_id)+' · '+esc(item.status)+'</b><span>score '+esc(item.score)+' · '+tp+' · '+fp+interval+' · sample '+esc(item.classified_sample_size)+' ('+esc(item.sample_sufficiency)+')'+(item.unclassified_sample_size?' · '+esc(item.unclassified_sample_size)+' unclassified':'')+'</span></div>';
+    }).join("")||"<div>No disposition history.</div>";
     q("#attackCoverage").innerHTML=leadPayload.coverage.filter(x=>x.observed).map(item=>'<div><b>'+esc(item.technique)+'</b><span>'+(item.covered?'Covered · '+esc(item.rule_count)+' rule(s)':'GAP')+'</span></div>').join("")||"<div>No observed ATT&CK techniques.</div>";
     q("#topUsers").innerHTML=leadPayload.top_users.map(item=>'<div><b>'+esc(item.user)+'</b><span>'+esc(item.events)+' events</span></div>').join("")||"<div>No user telemetry.</div>";
     q("#topHosts").innerHTML=leadPayload.top_hosts.map(item=>'<div><b>'+esc(item.host)+'</b><span>'+esc(item.events)+' events</span></div>').join("")||"<div>No host telemetry.</div>";
@@ -152,10 +157,17 @@ async function loadIRE(){
     ];
     q("#ireCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
 
+    const techniqueRows=(detection.technique_visibility||[]).map(item=>{
+      const first=item.first_detected_step==null?"blind":"step "+item.first_detected_step;
+      const delay=item.detection_delay_steps==null?"—":item.detection_delay_steps+" step(s)";
+      return '<div><b>'+esc(item.technique)+'</b><span>first observed step '+esc(item.first_observed_step)+' · first detection '+esc(first)+' · delay '+esc(delay)+' · visibility '+esc(item.visibility_percent)+'%'+(item.contributing_rules.length?' · rules '+esc(item.contributing_rules.join(", ")):'')+'</span></div>';
+    }).join("");
     q("#ireDetection").innerHTML=
       '<div><b>Observed techniques</b><span>'+esc(detection.observed_techniques.join(", ")||"—")+'</span></div>'+
       '<div><b>Covered techniques</b><span>'+esc(detection.covered_techniques.join(", ")||"—")+'</span></div>'+
-      '<div><b>Detection gaps</b><span class="'+(detection.gap_techniques.length?"ire-warn":"")+'">'+esc(detection.gap_techniques.join(", ")||"None")+'</span></div>';
+      '<div><b>Detection gaps</b><span class="'+(detection.gap_techniques.length?"ire-warn":"")+'">'+esc(detection.gap_techniques.join(", ")||"None")+'</span></div>'+
+      '<div><b>Blind meaningful steps</b><span>'+esc(detection.blind_steps)+'</span></div>'+
+      techniqueRows;
 
     const whatIfRes=await apiFetch("/api/ire/what-if");
     if(whatIfRes.status===403){
@@ -176,9 +188,11 @@ async function loadIRE(){
       q("#ireWhatIf").innerHTML='<div>What-If comparison unavailable.</div>';
     }
 
-    q("#ireQuality").innerHTML=quality.items.map(item=>
-      '<div><b class="'+(item.complete?"ire-good":"ire-warn")+'">'+(item.complete?"✓ ":"○ ")+esc(item.label)+'</b><span>'+esc(item.evidence)+'</span></div>'
-    ).join("");
+    q("#ireQuality").innerHTML=quality.items.map(item=>{
+      const state=item.applicable===false?"N/A":(item.complete?"✓":"○");
+      const cls=item.applicable===false?"":(item.complete?"ire-good":"ire-warn");
+      return '<div><b class="'+cls+'">'+state+' '+esc(item.label)+'</b><span>'+esc(item.evidence)+(item.analyst_confirmation_required?' · analyst confirmation':'')+'</span></div>';
+    }).join("");
 
     q("#ireReplay").innerHTML=replay.steps.map(step=>{
       const findings=step.new_findings.map(x=>'<span class="chip">+'+esc(x)+'</span>').join("");
@@ -198,7 +212,7 @@ async function loadIRE(){
     }else{
       q("#ireSimilar").innerHTML=similar.matches.map(item=>{
         const reasons=item.explanation.map(x=>'<div>'+esc(x)+'</div>').join("");
-        return '<div><b>'+esc(item.case_id)+' · '+esc(item.score)+'%</b><span>'+esc(item.title)+'</span>'+reasons+'</div>';
+        return '<div><b>'+esc(item.case_id)+' · '+esc(item.score)+'% · '+esc(item.confidence)+' confidence</b><span>'+esc(item.title)+' · '+esc(item.matched_dimensions)+'/'+esc(item.comparable_dimensions)+' evidence dimensions matched</span>'+reasons+'</div>';
       }).join("")||"<div>No comparable historical cases found.</div>";
     }
   }catch(err){
