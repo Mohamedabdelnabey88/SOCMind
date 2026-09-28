@@ -12,6 +12,9 @@ class EvidencePoint:
     kind: str
     statement: str
     event_index: int | None = None
+    timestamp: str | None = None
+    event_id: str | None = None
+    host: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +46,9 @@ def _context_points(events: list[Event]) -> list[EvidencePoint]:
                     "identity-context",
                     "Successful MFA from a trusted/managed device weakens an account-compromise hypothesis.",
                     index,
+                    event.timestamp.isoformat(),
+                    event.event_id,
+                    event.host,
                 )
             )
 
@@ -52,6 +58,9 @@ def _context_points(events: list[Event]) -> list[EvidencePoint]:
                     "change-context",
                     "Approved change-control context can explain execution or persistence activity.",
                     index,
+                    event.timestamp.isoformat(),
+                    event.event_id,
+                    event.host,
                 )
             )
 
@@ -61,6 +70,9 @@ def _context_points(events: list[Event]) -> list[EvidencePoint]:
                     "admin-context",
                     "Administrative approval is recorded for this activity.",
                     index,
+                    event.timestamp.isoformat(),
+                    event.event_id,
+                    event.host,
                 )
             )
 
@@ -71,6 +83,9 @@ def _context_points(events: list[Event]) -> list[EvidencePoint]:
                     "binary-context",
                     "Trusted code-signing context weakens, but does not eliminate, a malicious-execution hypothesis.",
                     index,
+                    event.timestamp.isoformat(),
+                    event.event_id,
+                    event.host,
                 )
             )
 
@@ -80,6 +95,9 @@ def _context_points(events: list[Event]) -> list[EvidencePoint]:
                     "network-context",
                     "The source is marked as an authorized scanner, which can explain repeated authentication attempts.",
                     index,
+                    event.timestamp.isoformat(),
+                    event.event_id,
+                    event.host,
                 )
             )
     return points
@@ -191,7 +209,14 @@ def render_contradictions(events: list[Event]) -> str:
         ] or ["    - none"]
         lines.append("  Contradicting / alternative context:")
         lines += [
-            f"    - {item['statement']}"
+            (
+                f"    - {item['statement']}"
+                + (
+                    f" [event={item['event_id']} host={item['host']} time={item['timestamp']}]"
+                    if item.get("event_id")
+                    else ""
+                )
+            )
             for item in review["contradicting"]
         ] or ["    - none observed"]
         lines.append("  Validation gaps:")
