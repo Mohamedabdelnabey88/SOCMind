@@ -49,6 +49,7 @@ from .quality_gate import load_checklist, quality_payload, render_quality_review
 from .ioc import extract_iocs
 from .notes import append_note
 from .process_tree import render_process_tree
+from .postgres_store import initialize_postgres, postgres_health
 from .provenance import fingerprint
 from .regression import generate_regression_package
 from .rbac import ROLE_PERMISSIONS
@@ -400,6 +401,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     pg_schema = sub.add_parser("postgres-schema", help="Write the PostgreSQL enterprise schema")
     pg_schema.add_argument("-o", "--output")
+
+    pg_init = sub.add_parser("postgres-init", help="Initialize SOCMind enterprise tables in PostgreSQL")
+    pg_init.add_argument("--dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN environment variable")
+
+    pg_health = sub.add_parser("postgres-health", help="Check PostgreSQL enterprise readiness")
+    pg_health.add_argument("--dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN environment variable")
+    pg_health.add_argument("--json", action="store_true")
 
     return parser
 
@@ -998,6 +1006,30 @@ def main() -> None:
         else:
             print(schema)
         return
+
+    if args.command == "postgres-init":
+        dsn = args.dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
+        if not dsn:
+            raise SystemExit("Set SOCMIND_POSTGRES_DSN or pass --dsn.")
+        initialize_postgres(dsn)
+        print("PostgreSQL enterprise schema initialized.")
+        return
+
+    if args.command == "postgres-health":
+        dsn = args.dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
+        if not dsn:
+            raise SystemExit("Set SOCMIND_POSTGRES_DSN or pass --dsn.")
+        result = postgres_health(dsn)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print("SOCMind PostgreSQL Health")
+            print("=========================")
+            print(f"database={result['database']}")
+            print(f"user={result['user']}")
+            print(f"socmind_tables={result['socmind_tables']}")
+            print(f"ready={result['ready']}")
+        raise SystemExit(0 if result["ready"] else 1)
 
     if args.command == "web":
         try:
