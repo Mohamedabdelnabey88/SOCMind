@@ -152,7 +152,7 @@ def replay_detection(events: list[Event], rules: list[DetectionRule]) -> Detecti
             rule_id
             for step in detected_relevant
             for rule_id in step.matched_rules
-            if technique in rule_map.get(rule_id, DetectionRule("", "", "", {}, [], [])).attack_techniques
+            if rule_id in rule_map and technique in rule_map[rule_id].attack_techniques
         })
         technique_visibility.append(
             TechniqueVisibility(
