@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_rbac_permissions_are_enforced():
     analyst = Principal("alice", "analyst", "test")
     require_permission(analyst, "case.note")
+    require_permission(analyst, "case.quality")
     with pytest.raises(PermissionError):
         require_permission(analyst, "case.assign")
 
