@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.0 — Enterprise Foundation
+
+- role-based access control for viewer/analyst/senior-analyst/lead/admin
+- signed trusted-proxy identity mode
+- PostgreSQL-backed case operations
+- PostgreSQL initialization and readiness CLI
+- tamper-evident hash-chained enterprise audit
+- consistent SQLite backup using the native backup API
+- retention dry-run/apply tooling
+- enterprise deployment documentation
+- real PostgreSQL CI validation
+
+
 ## 1.4.0 — Evidence Contradiction & Case Similarity
 
 - explicit contradiction/alternative-context review
