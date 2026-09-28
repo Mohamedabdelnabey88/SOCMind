@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from socmind.detection_replay import replay_detection
-from socmind.detections import load_rules
+from socmind.detections import evaluate_rule, load_rule, load_rules
 from socmind.engine import analyze
 from socmind.io import load_jsonl
 from socmind.quality_gate import review_investigation
@@ -76,6 +76,11 @@ def test_regression_package_contains_detection_engineering_artifacts(tmp_path):
         "tuning-notes.md",
     }
     assert expected.issubset({item.name for item in target.iterdir()})
+
+    candidate = load_rule(target / "candidate-detection.yml")
+    matches = evaluate_rule(candidate, events)
+    assert matches
+    assert candidate.status == "experimental"
 
 
 def test_what_if_can_compare_rule_packs():
