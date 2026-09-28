@@ -127,17 +127,21 @@ async function loadLeadHealth(){
 
 async function loadIRE(){
   try{
-    const [replayRes,detectionRes,whatIfRes,qualityRes]=await Promise.all([
+    const [replayRes,detectionRes,whatIfRes,qualityRes,contradictionRes,similarRes]=await Promise.all([
       apiFetch("/api/ire/replay"),
       apiFetch("/api/ire/detection-replay"),
       apiFetch("/api/ire/what-if"),
-      apiFetch("/api/ire/quality")
+      apiFetch("/api/ire/quality"),
+      apiFetch("/api/reasoning/contradictions"),
+      apiFetch("/api/reasoning/similar")
     ]);
-    if(!replayRes.ok||!detectionRes.ok||!whatIfRes.ok||!qualityRes.ok)throw new Error("IRE API unavailable");
+    if(!replayRes.ok||!detectionRes.ok||!whatIfRes.ok||!qualityRes.ok||!contradictionRes.ok||!similarRes.ok)throw new Error("IRE API unavailable");
     const replay=await replayRes.json();
     const detection=await detectionRes.json();
     const whatif=await whatIfRes.json();
     const quality=await qualityRes.json();
+    const contradictions=await contradictionRes.json();
+    const similar=await similarRes.json();
 
     q("#ireState").textContent="Replay ready";
     const metrics=[
@@ -145,7 +149,8 @@ async function loadIRE(){
       ["Blind Before Detect",detection.blind_steps_before_first_detection],
       ["Visibility",detection.visibility_percent+"%"],
       ["Detection Gaps",detection.gap_techniques.length],
-      ["Quality",quality.percentage+"%"]
+      ["Quality",quality.percentage+"%"],
+      ["Similar Cases",similar.summary?similar.summary.matches:0]
     ];
     q("#ireCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
 
@@ -174,6 +179,21 @@ async function loadIRE(){
       const hypotheses=step.hypotheses.map(h=>'<div class="ire-hyp">'+esc(h.name)+' · '+esc(h.confidence)+'% · '+esc((h.delta>=0?"+":"")+h.delta)+'</div>').join("");
       return '<div class="ire-step"><time>Step '+esc(step.index)+' · '+esc(step.timestamp)+'</time><strong>'+esc(step.source)+' · '+esc(step.event_id)+' · '+esc(step.host)+'</strong><div class="chips">'+findings+'</div>'+hypotheses+'</div>';
     }).join("");
+
+    q("#ireContradictions").innerHTML=contradictions.hypotheses.map(item=>{
+      const conflicting=item.contradicting.map(x=>'<div class="ire-warn">- '+esc(x.statement)+'</div>').join("");
+      const unresolved=item.unresolved.map(x=>'<div>? '+esc(x)+'</div>').join("");
+      return '<div><b>'+esc(item.hypothesis)+' · '+esc(item.confidence)+'%</b><span>'+esc(item.supporting.length)+' supporting · '+esc(item.contradicting.length)+' contradicting/context</span>'+conflicting+unresolved+'</div>';
+    }).join("")||"<div>No hypotheses available for contradiction review.</div>";
+
+    if(similar.enabled===false){
+      q("#ireSimilar").innerHTML='<div>Configure <b>--command-db</b> with evidence-linked historical cases to enable similarity.</div>';
+    }else{
+      q("#ireSimilar").innerHTML=similar.matches.map(item=>{
+        const reasons=item.explanation.map(x=>'<div>'+esc(x)+'</div>').join("");
+        return '<div><b>'+esc(item.case_id)+' · '+esc(item.score)+'%</b><span>'+esc(item.title)+'</span>'+reasons+'</div>';
+      }).join("")||"<div>No comparable historical cases found.</div>";
+    }
   }catch(err){
     q("#ireState").textContent="Unavailable";
   }
