@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .command_center import command_center_snapshot
 from .dashboard import build_dashboard_payload
 from .io import load_jsonl
 
 
-def create_app(events_path: str | Path, *, case_id: str = "SOCMIND-WEB"):
+def create_app(events_path: str | Path, *, case_id: str = "SOCMIND-WEB", command_db: str | Path | None = None):
     try:
         from fastapi import FastAPI, HTTPException
         from fastapi.responses import FileResponse
@@ -23,12 +24,13 @@ def create_app(events_path: str | Path, *, case_id: str = "SOCMIND-WEB"):
     assets = Path(__file__).with_name("web")
     app = FastAPI(
         title="SOCMind Web Investigation Dashboard",
-        version="0.7.0",
+        version="0.8.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
     app.state.events_path = source
     app.state.case_id = case_id
+    app.state.command_db = Path(command_db).resolve() if command_db else None
 
     @app.get("/health")
     def health():
@@ -41,6 +43,16 @@ def create_app(events_path: str | Path, *, case_id: str = "SOCMIND-WEB"):
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return build_dashboard_payload(events, case_id=app.state.case_id)
+
+    @app.get("/api/command-center")
+    def command_center():
+        if app.state.command_db is None:
+            return {"enabled": False, "summary": {}, "queue": [], "workload": [], "sla_breaches": []}
+        try:
+            payload = command_center_snapshot(app.state.command_db)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"enabled": True, **payload}
 
     @app.get("/")
     def index():
