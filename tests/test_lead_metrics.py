@@ -19,6 +19,11 @@ def test_detection_health_flags_noisy_rule():
     assert len(rows) == 1
     assert rows[0].noisy is True
     assert rows[0].false_positive_rate == 0.8
+    assert rows[0].classified_sample_size == 5
+    assert rows[0].sample_sufficiency == "limited"
+    assert rows[0].false_positive_rate_low is not None
+    assert rows[0].false_positive_rate_high is not None
+    assert rows[0].status == "noisy"
     assert rows[0].score < 60
 
 
@@ -33,3 +38,13 @@ def test_lead_snapshot_contains_coverage_and_top_entities():
     assert snap["summary"]["observed_techniques"] > 0
     assert snap["top_hosts"]
     assert snap["detection_health"]
+
+
+def test_detection_health_does_not_overstate_tiny_samples():
+    rows = detection_health([
+        DispositionRecord("tiny-rule", "true-positive"),
+        DispositionRecord("tiny-rule", "true-positive"),
+    ])
+    assert rows[0].sample_sufficiency == "insufficient"
+    assert rows[0].status == "insufficient-data"
+    assert rows[0].score < 100

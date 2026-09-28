@@ -36,6 +36,11 @@ def test_detection_replay_exposes_blind_spots():
     assert result.first_detection_step is not None
     assert result.observed_techniques
     assert 0 <= result.visibility_percent <= 100
+    assert result.blind_steps >= 0
+    assert result.technique_visibility
+    assert any(item.first_observed_step >= 1 for item in result.technique_visibility)
+    assert result.rule_contributions
+    assert all(item.matched_steps >= 1 for item in result.rule_contributions)
 
 
 def test_quality_gate_keeps_analyst_validation_explicit():
@@ -43,6 +48,8 @@ def test_quality_gate_keeps_analyst_validation_explicit():
     review = review_investigation(events)
     assert review.total >= 10
     assert "Detection feedback completed" in review.outstanding
+    assert all(hasattr(item, "applicable") for item in review.items)
+    assert any(item.analyst_confirmation_required for item in review.items)
 
     completed = review_investigation(
         events,
