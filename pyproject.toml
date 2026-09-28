@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "socmind"
-version = "0.6.0"
+version = "0.7.0"
 description = "Cross-platform SOC Tier 1/2 investigation, detection-engineering and integration toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,7 +24,8 @@ dependencies = []
 [project.optional-dependencies]
 evtx = ["python-evtx>=0.8.1"]
 sigma = ["PyYAML>=6.0.2"]
-all = ["python-evtx>=0.8.1", "PyYAML>=6.0.2"]
+web = ["fastapi>=0.116.0", "uvicorn>=0.35.0"]
+all = ["python-evtx>=0.8.1", "PyYAML>=6.0.2", "fastapi>=0.116.0", "uvicorn>=0.35.0"]
 
 [project.scripts]
 socmind = "socmind.cli:main"
@@ -32,3 +33,6 @@ socmind = "socmind.cli:main"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/socmind"]

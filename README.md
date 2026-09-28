@@ -22,7 +22,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v0.6 — SOC Integrations + Kali Linux validation**
+> **v0.7 — Web Investigation Dashboard**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -33,6 +33,7 @@ SOCMind is continuously validated on:
 - Windows + Python 3.11 / 3.12
 - Ubuntu + Python 3.11 / 3.12
 - **Kali Linux Rolling** inside the official `kalilinux/kali-rolling` container
+- Web dashboard smoke-tested on Kali Linux CI
 
 ## Kali Linux quick start
 
@@ -72,6 +73,52 @@ socmind analyze examples/linux_attack_chain.jsonl \
 ```
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
+
+## Web Investigation Dashboard
+
+SOCMind now includes a local browser-based investigation workbench with:
+
+- executive investigation metrics
+- prioritized T1/T2 findings
+- evidence-based hypotheses
+- interactive draggable evidence graph
+- event timeline
+- extracted IOCs
+- observed MITRE ATT&CK techniques
+- local FastAPI endpoint for future integrations
+
+Install:
+
+```bash
+pip install -e ".[web]"
+```
+
+Launch:
+
+```bash
+socmind web examples/attack_chain.jsonl \
+  --case-id DEMO-001
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765
+```
+
+Kali Linux:
+
+```bash
+source .venv/bin/activate
+pip install -e ".[all]"
+
+socmind web examples/linux_attack_chain.jsonl \
+  --case-id KALI-DEMO-001
+```
+
+The dashboard binds to `127.0.0.1` by default so investigation data is not exposed to the network accidentally.
+
+Detailed guide: [Web Investigation Dashboard](docs/web-dashboard.md)
 
 ## SIEM integrations
 
@@ -151,6 +198,63 @@ The Markdown handoff package includes:
 - reusable playbooks
 - structured case JSON
 
+## Real SOC operations
+
+SOCMind now models the operational work around an investigation, not only the technical detection.
+
+### Case lifecycle
+
+```text
+New → Triage → Investigating → Contained → Resolved
+                 └────────────→ False Positive
+```
+
+Create and assign a case:
+
+```bash
+socmind case-init case.json \
+  --case-id INC-2026-001 \
+  --priority P1 \
+  --owner analyst1
+
+socmind case-transition case.json --state triage
+socmind case-assign case.json --owner tier2-analyst
+```
+
+Check SLA:
+
+```bash
+socmind sla case.json
+```
+
+Fingerprint evidence:
+
+```bash
+socmind evidence normalized.jsonl
+```
+
+Create a shift handoff:
+
+```bash
+socmind handoff normalized.jsonl \
+  --case-id INC-2026-001 \
+  -o shift-handoff.md
+```
+
+Record analyst actions:
+
+```bash
+socmind audit analyst-audit.jsonl \
+  --case-id INC-2026-001 \
+  --actor tier2-analyst \
+  --action investigated \
+  --detail "Validated authentication, process, and network evidence."
+```
+
+These workflows demonstrate ownership, escalation discipline, SLA awareness, evidence provenance, shift continuity, and analyst accountability — the operational skills expected in a production SOC.
+
+Detailed guide: [Real SOC Workflow Model](docs/real-soc-workflow.md)
+
 ## Detection engineering
 
 SOCMind also includes:
@@ -175,6 +279,32 @@ socmind gaps examples/attack_chain.jsonl --rules detections
 socmind tune examples/dispositions.jsonl
 ```
 
+## One-command investigation workspace
+
+For a realistic analyst workflow, SOCMind can build a complete investigation package from normalized telemetry:
+
+```bash
+socmind investigate examples/attack_chain.jsonl \
+  -o demo-case \
+  --case-id DEMO-001 \
+  --priority P1 \
+  --owner mohamed
+```
+
+The workspace contains:
+
+```text
+demo-case/
+├── case-state.json
+├── case.json
+├── escalation.md
+├── shift-handoff.md
+├── evidence-provenance.json
+└── workspace-summary.json
+```
+
+This is useful for both real analyst handoff and a portfolio demonstration because it shows the complete path from telemetry to a documented, attributable investigation.
+
 ## Full investigation workflow
 
 ```bash
@@ -196,6 +326,8 @@ socmind analyze normalized.jsonl \
 - [SOC Integrations](docs/soc-integrations.md)
 - [Kali Linux](docs/kali-linux.md)
 - [Case 001](docs/cases/case-001-authentication-to-persistence.md)
+- [Real SOC Workflow](docs/real-soc-workflow.md)
+- [Portfolio / Interview Story](docs/portfolio-story.md)
 
 ## CI quality gate
 
@@ -234,7 +366,7 @@ Every pull request validates:
 - analyst workflow state
 
 ### v1.0
-- web investigation workspace
+- authenticated multi-case web investigation workspace
 - interactive evidence graph
 - case management
 - pluggable SIEM/SOAR integrations
