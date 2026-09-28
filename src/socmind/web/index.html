@@ -15,6 +15,7 @@
       </div>
       <nav>
         <button class="nav" data-target="command">Command Center</button>
+        <button class="nav" data-target="lead">SOC Lead</button>
         <button class="nav active" data-target="overview">Overview</button>
         <button class="nav" data-target="findings">Findings</button>
         <button class="nav" data-target="graph">Evidence Graph</button>
@@ -48,6 +49,19 @@
             <div class="card-head"><h2>Analyst Workload</h2><span>Active assignments</span></div>
             <div id="workload" class="stack compact"></div>
           </article>
+        </div>
+      </section>
+
+      <section id="lead" class="panel page">
+        <div class="section-head"><div><p class="eyebrow">Detection Quality</p><h2>SOC Lead & Detection Health</h2></div><span id="leadState" class="pill">Loading</span></div>
+        <div id="leadCards" class="cards"></div>
+        <div class="grid two">
+          <article class="card"><div class="card-head"><h2>Detection Health</h2><span>TP / FP / noise</span></div><div id="detectionHealth" class="stack compact"></div></article>
+          <article class="card"><div class="card-head"><h2>ATT&CK Coverage</h2><span>Observed vs covered</span></div><div id="attackCoverage" class="stack compact"></div></article>
+        </div>
+        <div class="grid two" style="margin-top:16px">
+          <article class="card"><div class="card-head"><h2>Top Users</h2><span>Event concentration</span></div><div id="topUsers" class="stack compact"></div></article>
+          <article class="card"><div class="card-head"><h2>Top Hosts</h2><span>Event concentration</span></div><div id="topHosts" class="stack compact"></div></article>
         </div>
       </section>
 
