@@ -911,6 +911,12 @@ def main() -> None:
 
     if args.command == "what-if":
         events = load_jsonl(args.events)
+        current_audit = rule_audit_payload(args.current_rules)
+        proposed_audit = rule_audit_payload(args.proposed_rules)
+        if not current_audit["production_ready"]:
+            raise SystemExit("Current rule pack failed rule-pack-audit.")
+        if not proposed_audit["production_ready"]:
+            raise SystemExit("Proposed rule pack failed rule-pack-audit.")
         current_rules = load_rules(args.current_rules)
         proposed_rules = load_rules(args.proposed_rules)
         if args.json:
