@@ -52,4 +52,4 @@ A production deployment should still provide organization-specific:
 - monitoring and patch management
 - load/soak validation for the intended analyst and telemetry scale
 
-The built-in local API token is intended for local/small deployments. Trusted-proxy mode requires a correctly secured authenticating proxy and shared signing secret.
+The built-in local API token is intended for local/small deployments. Trusted-proxy mode requires a correctly secured authenticating proxy and shared signing secret. The proxy must strip client-supplied `X-SOCMind-*` identity headers, generate fresh timestamped signatures, and keep the signing secret out of analyst browsers.
