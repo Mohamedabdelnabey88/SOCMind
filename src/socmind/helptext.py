@@ -148,6 +148,21 @@ Turn a confirmed incident into detection-engineering artifacts:
 IRE is designed to close the loop:
 incident -> investigation -> blind spots -> detection change -> regression.
 """,
+    "reasoning": """SOCMind Evidence Reasoning & Case Similarity
+
+Review supporting, contradicting and unresolved evidence:
+  socmind contradictions examples/attack_chain.jsonl
+
+Find similar historical evidence-linked cases:
+  socmind similar-cases examples/attack_chain.jsonl \
+    --database socmind-demo/socmind-demo.db \
+    --limit 5
+
+Interpretation:
+- contradiction review highlights alternative/benign context and validation gaps
+- similarity is evidence/behavior overlap, not attacker attribution
+- neither command replaces analyst judgment
+""",
     "demo": """SOCMind Portfolio Demo
 
   socmind demo-init -o socmind-demo
@@ -178,6 +193,7 @@ Topics:
   security
   performance
   ire
+  reasoning
   demo
 
 Common first commands:
