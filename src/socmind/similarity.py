@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .command_center import list_cases
+from .enterprise_command_center import list_cases_pg
 from .engine import analyze
 from .ioc import extract_iocs
 from .io import load_jsonl
@@ -78,9 +79,9 @@ def compare_fingerprints(left: CaseFingerprint, right: CaseFingerprint) -> tuple
     return round(score, 1), parts
 
 
-def find_similar_cases(
+def _find_similar_from_records(
     events: list[Event],
-    database: str | Path,
+    cases,
     *,
     limit: int = 5,
     exclude_case_id: str | None = None,
@@ -88,7 +89,7 @@ def find_similar_cases(
     current = fingerprint_case(events)
     matches: list[SimilarCase] = []
 
-    for case in list_cases(database):
+    for case in cases:
         if exclude_case_id and case.case_id == exclude_case_id:
             continue
         if not case.evidence_path:
@@ -145,6 +146,36 @@ def find_similar_cases(
     return sorted(matches, key=lambda item: (-item.score, item.case_id))[:max(1, limit)]
 
 
+def find_similar_cases(
+    events: list[Event],
+    database: str | Path,
+    *,
+    limit: int = 5,
+    exclude_case_id: str | None = None,
+) -> list[SimilarCase]:
+    return _find_similar_from_records(
+        events,
+        list_cases(database),
+        limit=limit,
+        exclude_case_id=exclude_case_id,
+    )
+
+
+def find_similar_cases_pg(
+    events: list[Event],
+    dsn: str,
+    *,
+    limit: int = 5,
+    exclude_case_id: str | None = None,
+) -> list[SimilarCase]:
+    return _find_similar_from_records(
+        events,
+        list_cases_pg(dsn),
+        limit=limit,
+        exclude_case_id=exclude_case_id,
+    )
+
+
 def similarity_payload(
     events: list[Event],
     database: str | Path,
@@ -155,6 +186,32 @@ def similarity_payload(
     matches = find_similar_cases(
         events,
         database,
+        limit=limit,
+        exclude_case_id=exclude_case_id,
+    )
+    return {
+        "matches": [asdict(item) for item in matches],
+        "summary": {
+            "matches": len(matches),
+            "highest_score": matches[0].score if matches else 0.0,
+        },
+        "interpretation": (
+            "Similarity is evidence/behavior overlap, not attribution and not proof "
+            "that cases share the same attacker."
+        ),
+    }
+
+
+def similarity_payload_pg(
+    events: list[Event],
+    dsn: str,
+    *,
+    limit: int = 5,
+    exclude_case_id: str | None = None,
+) -> dict:
+    matches = find_similar_cases_pg(
+        events,
+        dsn,
         limit=limit,
         exclude_case_id=exclude_case_id,
     )
