@@ -11,7 +11,6 @@ from socmind.command_center import upsert_case
 from socmind.enterprise_auth import (
     AuthConfig,
     authenticate,
-    sign_trusted_proxy_identity,
     trusted_proxy_headers,
 )
 from socmind.enterprise_ops import (
@@ -99,6 +98,18 @@ def test_backup_and_retention_are_safe_by_default(tmp_path):
 
     with pytest.raises(ValueError):
         backup_sqlite(db, db)
+
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    link = tmp_path / "exports" / "outside-link.json"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        return
+    os.utime(outside, (1, 1))
+    preview = retention_scan(tmp_path / "exports", days=30)
+    assert preview.eligible == 0
+    assert outside.exists()
 
 
 def test_postgres_schema_contains_enterprise_tables_and_indexes():
