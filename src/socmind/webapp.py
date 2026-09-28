@@ -530,6 +530,8 @@ def create_app(
                     "proposed": proposed_audit,
                 },
             }
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
