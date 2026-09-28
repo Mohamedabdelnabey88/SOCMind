@@ -106,10 +106,10 @@ async function mutateCase(path,body=null){
   if(!res.ok){const e=await res.json().catch(()=>({detail:"Request failed"}));alert(e.detail||"Request failed");return;}
   await openCase(currentCaseId);await loadCommandCenter();
 }
-q("#ackCase").addEventListener("click",()=>mutateCase("/acknowledge?actor=web-analyst"));
-q("#assignCase").addEventListener("click",()=>{const owner=q("#assignOwner").value.trim();if(owner)mutateCase("/assign",{owner,actor:"web-analyst"});});
-q("#transitionCase").addEventListener("click",()=>{const state=q("#transitionState").value;if(state)mutateCase("/transition",{state,actor:"web-analyst"});});
-q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim();if(!text)return;mutateCase("/notes",{author:q("#noteAuthor").value.trim()||"web-analyst",text}).then(()=>q("#noteText").value="");});
+q("#ackCase").addEventListener("click",()=>mutateCase("/acknowledge"));
+q("#assignCase").addEventListener("click",()=>{const owner=q("#assignOwner").value.trim();if(owner)mutateCase("/assign",{owner});});
+q("#transitionCase").addEventListener("click",()=>{const state=q("#transitionState").value;if(state)mutateCase("/transition",{state});});
+q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim();if(!text)return;mutateCase("/notes",{text}).then(()=>q("#noteText").value="");});
 
 async function loadLeadHealth(){
   try{
