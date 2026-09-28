@@ -80,6 +80,9 @@ Coverage and gaps:
   socmind coverage examples/attack_chain.jsonl --rules detections
   socmind gaps examples/attack_chain.jsonl --rules detections
 
+Audit rule-pack quality:
+  socmind rule-pack-audit --rules detections
+
 Tuning feedback:
   socmind tune examples/dispositions.jsonl
   socmind lead-health examples/attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl
@@ -156,6 +159,7 @@ Review supporting, contradicting and unresolved evidence:
 Find similar historical evidence-linked cases:
   socmind similar-cases examples/attack_chain.jsonl \
     --database socmind-demo/socmind-demo.db \
+    --min-score 40 \
     --limit 5
 
 Interpretation:
@@ -196,6 +200,7 @@ Enterprise web example:
   export SOCMIND_TRUSTED_PROXY_SECRET='shared-secret'
   socmind web events.jsonl --postgres-dsn "$SOCMIND_POSTGRES_DSN" \
     --auth-mode trusted-proxy --enterprise-audit enterprise-audit.jsonl \
+    --enforce-quality-on-close \
     --host 0.0.0.0
 
 The trusted-proxy mode is designed for deployment behind an authenticating reverse proxy / identity-aware gateway. The proxy must strip client-supplied X-SOCMind-* identity headers and generate fresh signed headers.
