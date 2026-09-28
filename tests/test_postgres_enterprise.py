@@ -139,6 +139,14 @@ def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):
     )
     assert note.status_code == 200
 
+    quality = client.put(
+        "/api/cases/PG-WEB-001/quality-checklist",
+        headers=lead,
+        json={"checklist": {"scope_validated": True, "handoff_complete": True}},
+    )
+    assert quality.status_code == 200
+    assert quality.json()["checklist"]["scope_validated"] is True
+
     health = client.get("/health").json()
     assert health["case_store"] == "postgres"
     assert health["enterprise_audit"] is True
