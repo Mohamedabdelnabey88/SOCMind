@@ -65,7 +65,7 @@ def create_app(
     assets = Path(__file__).with_name("web")
     app = FastAPI(
         title="SOCMind Enterprise SOC Workspace",
-        version="1.5.0",
+        version="1.6.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
