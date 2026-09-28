@@ -58,6 +58,22 @@ command-center
 shift-brief
 ```
 
+## Investigation Replay Engine
+
+```text
+replay
+detection-replay
+what-if
+case-review
+learn-from-case
+```
+
+Workflow help:
+
+```bash
+socmind help ire
+```
+
 ## Detection engineering
 
 ```text
