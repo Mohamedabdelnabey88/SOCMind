@@ -24,6 +24,7 @@ from .graph import render_mermaid
 from .handoff import render_shift_handoff
 from .hypothesis import generate_hypotheses
 from .io import load_jsonl
+from .lead_metrics import lead_snapshot
 from .ioc import extract_iocs
 from .notes import append_note
 from .process_tree import render_process_tree
@@ -31,6 +32,7 @@ from .provenance import fingerprint
 from .report import render_text
 from .rule_tests import run_rule_test
 from .sla import evaluate_sla
+from .shift_brief import render_shift_brief
 from .timeline import render_timeline
 from .tuning import load_dispositions, suggest_tuning
 from .workspace import build_workspace
@@ -202,6 +204,19 @@ def build_parser() -> argparse.ArgumentParser:
     command_ack = sub.add_parser("command-ack", help="Acknowledge a case and start MTTA tracking")
     command_ack.add_argument("database")
     command_ack.add_argument("case_id")
+
+    lead_cmd = sub.add_parser("lead-health", help="Show SOC lead detection-health metrics")
+    lead_cmd.add_argument("events")
+    lead_cmd.add_argument("--rules", default="detections")
+    lead_cmd.add_argument("--dispositions")
+    lead_cmd.add_argument("--json", action="store_true")
+
+    brief_cmd = sub.add_parser("shift-brief", help="Generate a SOC shift brief")
+    brief_cmd.add_argument("database")
+    brief_cmd.add_argument("events")
+    brief_cmd.add_argument("--rules", default="detections")
+    brief_cmd.add_argument("--dispositions")
+    brief_cmd.add_argument("-o", "--output")
 
     return parser
 
@@ -449,6 +464,49 @@ def main() -> None:
                     f"- {item['priority']} | {item['case_id']} | {item['state']} | "
                     f"{item['owner'] or 'Unassigned'} | {sla_text}"
                 )
+        return
+
+    if args.command == "lead-health":
+        snapshot = lead_snapshot(
+            args.events,
+            rules_dir=args.rules,
+            dispositions_path=args.dispositions,
+        )
+        if args.json:
+            print(json.dumps(snapshot, indent=2))
+        else:
+            summary = snapshot["summary"]
+            print("SOCMind Detection Health")
+            print("========================")
+            print(
+                f"events={summary['events']} findings={summary['findings']} "
+                f"rules={summary['rules']} coverage="
+                f"{summary['coverage_percent'] if summary['coverage_percent'] is not None else '-'}% "
+                f"noisy={summary['noisy_rules']}"
+            )
+            print("\nRule health:")
+            for item in snapshot["detection_health"]:
+                fp = "-" if item["false_positive_rate"] is None else f"{item['false_positive_rate']:.0%}"
+                tp = "-" if item["true_positive_rate"] is None else f"{item['true_positive_rate']:.0%}"
+                print(
+                    f"- {item['rule_id']} | score={item['score']} | TP={tp} | FP={fp} "
+                    f"| samples={item['sample_size']} | noisy={'yes' if item['noisy'] else 'no'}"
+                )
+        return
+
+    if args.command == "shift-brief":
+        command = command_center_snapshot(args.database)
+        lead = lead_snapshot(
+            args.events,
+            rules_dir=args.rules,
+            dispositions_path=args.dispositions,
+        )
+        text = render_shift_brief(command, lead)
+        if args.output:
+            Path(args.output).write_text(text, encoding="utf-8")
+            print(f"Shift brief exported -> {args.output}")
+        else:
+            print(text)
         return
 
     if args.command == "web":
