@@ -104,6 +104,13 @@ CREATE TABLE IF NOT EXISTS case_audit (
   timestamp TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS case_quality (
+  case_id TEXT PRIMARY KEY REFERENCES cases(case_id) ON DELETE CASCADE,
+  checklist_json JSONB NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority, state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
 CREATE INDEX IF NOT EXISTS idx_notes_case ON case_notes(case_id, created_at);
