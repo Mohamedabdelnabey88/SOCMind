@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 from .audit_chain import append_record, verify_chain
