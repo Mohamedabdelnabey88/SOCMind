@@ -94,15 +94,7 @@ def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):
     client = TestClient(app)
 
     def headers(subject, role):
-        return {
-            "X-SOCMind-User": subject,
-            "X-SOCMind-Role": role,
-            "X-SOCMind-Signature": sign_trusted_proxy_identity(
-                secret,
-                subject,
-                role,
-            ),
-        }
+        return trusted_proxy_headers(secret, subject, role)
 
     viewer = headers("viewer@example.com", "viewer")
     lead = headers("lead@example.com", "lead")
