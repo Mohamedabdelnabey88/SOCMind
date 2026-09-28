@@ -17,6 +17,7 @@ class DetectionStep:
     techniques: list[str]
     matched_rules: list[str]
     detected: bool
+    technique_aligned_detected: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +95,11 @@ def replay_detection(events: list[Event], rules: list[DetectionRule]) -> Detecti
     for index, event in enumerate(ordered, 1):
         techniques = sorted(event_techniques.get(_event_key(event), set()))
         matched_rules = sorted(set(matched_by_event.get(_event_key(event), [])))
+        aligned = any(
+            set(rule_by_id[rule_id].attack_techniques) & set(techniques)
+            for rule_id in matched_rules
+            if rule_id in rule_by_id
+        )
         steps.append(
             DetectionStep(
                 index=index,
@@ -103,14 +109,17 @@ def replay_detection(events: list[Event], rules: list[DetectionRule]) -> Detecti
                 techniques=techniques,
                 matched_rules=matched_rules,
                 detected=bool(matched_rules),
+                technique_aligned_detected=aligned,
             )
         )
 
     meaningful = [step for step in steps if step.techniques]
-    detected_meaningful = [step for step in meaningful if step.detected]
+    detected_meaningful = [
+        step for step in meaningful if step.technique_aligned_detected
+    ]
     first_detection = next((step.index for step in steps if step.detected), None)
     first_meaningful_detection = next(
-        (step.index for step in meaningful if step.detected),
+        (step.index for step in meaningful if step.technique_aligned_detected),
         None,
     )
 
@@ -118,7 +127,8 @@ def replay_detection(events: list[Event], rules: list[DetectionRule]) -> Detecti
         blind_before = sum(
             1
             for step in meaningful
-            if step.index < first_meaningful_detection and not step.detected
+            if step.index < first_meaningful_detection
+            and not step.technique_aligned_detected
         )
     else:
         blind_before = len(meaningful)
@@ -270,7 +280,11 @@ def render_detection_replay(events: list[Event], rules: list[DetectionRule]) -> 
     for step in result.steps:
         if not step.techniques:
             continue
-        state = "DETECTED" if step.detected else "BLIND"
+        state = (
+            "DETECTED"
+            if step.technique_aligned_detected
+            else ("RULE-MATCH-NONALIGNED" if step.detected else "BLIND")
+        )
         rules_text = ",".join(step.matched_rules) if step.matched_rules else "-"
         lines.append(
             f"- step {step.index}: {step.event_id} | {state} | "
