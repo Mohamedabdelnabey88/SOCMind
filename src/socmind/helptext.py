@@ -163,6 +163,42 @@ Interpretation:
 - similarity is evidence/behavior overlap, not attacker attribution
 - neither command replaces analyst judgment
 """,
+    "enterprise": """SOCMind Enterprise Foundation
+
+Install enterprise support:
+  pip install -e ".[enterprise,web,sigma]"
+
+Inspect roles and permissions:
+  socmind enterprise-info
+
+PostgreSQL:
+  export SOCMIND_POSTGRES_DSN='postgresql://user:pass@db:5432/socmind'
+  socmind postgres-init
+  socmind postgres-health
+
+Trusted reverse-proxy identity:
+  export SOCMIND_TRUSTED_PROXY_SECRET='shared-secret'
+  socmind trusted-sign --subject analyst@example.com --role analyst
+
+Tamper-evident audit:
+  socmind audit-verify enterprise-audit.jsonl
+
+Backup local SQLite:
+  socmind backup socmind.db -o backups/socmind.db
+
+Retention preview:
+  socmind retention ./exports --days 90
+  socmind retention ./exports --days 90 --apply
+
+Enterprise web example:
+  export SOCMIND_POSTGRES_DSN='postgresql://user:pass@db:5432/socmind'
+  export SOCMIND_TRUSTED_PROXY_SECRET='shared-secret'
+  socmind web events.jsonl --postgres-dsn "$SOCMIND_POSTGRES_DSN" \
+    --auth-mode trusted-proxy --enterprise-audit enterprise-audit.jsonl \
+    --host 0.0.0.0
+
+The trusted-proxy mode is designed for deployment behind an authenticating reverse proxy / identity-aware gateway.
+""",
     "demo": """SOCMind Portfolio Demo
 
   socmind demo-init -o socmind-demo
@@ -194,6 +230,7 @@ Topics:
   performance
   ire
   reasoning
+  enterprise
   demo
 
 Common first commands:
