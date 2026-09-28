@@ -27,6 +27,7 @@ Viewer permissions plus:
 
 - acknowledge cases
 - add notes
+- record per-case investigation quality sign-off
 
 ### senior-analyst
 
@@ -139,6 +140,7 @@ socmind postgres-health
 The PostgreSQL backend supports:
 
 - cases
+- per-case investigation quality state
 - notes
 - audit events
 - assignment
@@ -161,6 +163,16 @@ socmind web events.jsonl \
 If both `--postgres-dsn` and `--command-db` are configured, PostgreSQL is the active case store.
 
 SQLite remains supported for local/demo workflows.
+
+For teams that want investigation quality to become a lifecycle control rather than a passive report, enable:
+
+```bash
+socmind web events.jsonl \
+  --postgres-dsn "$SOCMIND_POSTGRES_DSN" \
+  --enforce-quality-on-close
+```
+
+When enabled, a transition to `resolved` requires linked evidence and a per-case quality checklist that passes all required checks.
 
 ## Tamper-evident enterprise audit
 
