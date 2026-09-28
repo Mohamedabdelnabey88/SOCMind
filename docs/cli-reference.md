@@ -56,6 +56,8 @@ command-note
 command-show
 command-center
 shift-brief
+
+# command-center supports --query/--priority/--state/--owner/--limit/--offset
 ```
 
 ## Investigation Replay Engine
@@ -96,6 +98,7 @@ coverage
 gaps
 tune
 lead-health
+rule-pack-audit
 ```
 
 ## Enterprise operations
