@@ -42,7 +42,7 @@ def create_app(
     assets = Path(__file__).with_name("web")
     app = FastAPI(
         title="SOCMind Real SOC Workspace",
-        version="1.0.0",
+        version="1.2.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
@@ -54,6 +54,26 @@ def create_app(
         Path(dispositions_path).resolve() if dispositions_path else None
     )
     app.state.api_token = api_token
+
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'"
+        )
+        return response
 
     def require_token(x_socmind_token: str | None = Header(default=None)) -> None:
         expected = app.state.api_token
