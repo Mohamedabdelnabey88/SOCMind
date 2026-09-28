@@ -72,6 +72,9 @@ jobs:
       - run: socmind help reasoning
       - run: socmind contradictions examples/attack_chain.jsonl --json
       - run: socmind similar-cases examples/attack_chain.jsonl --database ci-demo/socmind-demo.db --exclude-case-id DEMO-P1-001 --json
+      - run: socmind help enterprise
+      - run: socmind enterprise-info --json
+      - run: socmind postgres-schema -o socmind-postgres.sql
 
   kali:
     runs-on: ubuntu-latest
@@ -133,6 +136,9 @@ jobs:
           .venv/bin/socmind help reasoning
           .venv/bin/socmind contradictions examples/attack_chain.jsonl --json
           .venv/bin/socmind similar-cases examples/attack_chain.jsonl --database kali-demo/socmind-demo.db --exclude-case-id DEMO-P1-001 --json
+          .venv/bin/socmind help enterprise
+          .venv/bin/socmind enterprise-info --json
+          .venv/bin/socmind postgres-schema -o kali-postgres.sql
       - name: Exercise web dashboard on Kali
         shell: bash
         run: |
@@ -159,6 +165,8 @@ jobs:
       - run: wheel-venv/bin/socmind help ire
       - run: wheel-venv/bin/socmind detection-replay examples/attack_chain.jsonl --rules detections --json
       - run: wheel-venv/bin/socmind contradictions examples/attack_chain.jsonl --json
+      - run: wheel-venv/bin/socmind help enterprise
+      - run: wheel-venv/bin/socmind enterprise-info --json
       - run: wheel-venv/bin/socmind doctor
       - name: Verify packaged web assets
         shell: bash
@@ -168,3 +176,37 @@ jobs:
           sleep 3
           python -c "import json,urllib.request; data=urllib.request.urlopen('http://127.0.0.1:8877/').read().decode(); ire=json.load(urllib.request.urlopen('http://127.0.0.1:8877/api/ire/detection-replay')); assert 'SOCMind' in data and 'Investigation Replay' in data and ire['first_detection_step'] is not None"
           kill $pid
+
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: socmind
+          POSTGRES_PASSWORD: socmind
+          POSTGRES_DB: socmind
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U socmind -d socmind"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SOCMIND_POSTGRES_DSN: postgresql://socmind:socmind@127.0.0.1:5432/socmind
+      SOCMIND_TEST_POSTGRES_DSN: postgresql://socmind:socmind@127.0.0.1:5432/socmind
+      SOCMIND_TRUSTED_PROXY_SECRET: ci-proxy-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[sigma,web,enterprise]" pytest httpx
+      - run: socmind postgres-init
+      - run: socmind postgres-health --json
+      - run: pytest -q tests/test_enterprise_foundation.py tests/test_postgres_enterprise.py
+      - run: socmind enterprise-info --json
+      - run: socmind trusted-sign --subject ci-analyst@example.com --role analyst

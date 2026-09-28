@@ -24,7 +24,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v1.4 — Evidence Contradiction & Case Similarity**
+> **v1.5 — Enterprise Foundation**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -75,6 +75,78 @@ socmind analyze examples/linux_attack_chain.jsonl \
 ```
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
+
+## v1.5 Enterprise Foundation
+
+SOCMind now supports a team-oriented enterprise foundation while preserving SQLite for local/demo use.
+
+### RBAC
+
+Built-in roles:
+
+- viewer
+- analyst
+- senior-analyst
+- lead
+- admin
+
+Inspect them:
+
+```bash
+socmind enterprise-info
+```
+
+### PostgreSQL case store
+
+```bash
+pip install -e ".[enterprise,web,sigma]"
+
+export SOCMIND_POSTGRES_DSN='postgresql://socmind:password@db:5432/socmind'
+
+socmind postgres-init
+socmind postgres-health
+```
+
+The Web Workspace can run its case queue, notes, assignments, lifecycle transitions, SLA/MTTA/MTTR and evidence-linked similarity on PostgreSQL:
+
+```bash
+socmind web events.jsonl \
+  --postgres-dsn "$SOCMIND_POSTGRES_DSN"
+```
+
+### Trusted enterprise identity
+
+SOCMind can run behind an authenticating reverse proxy / identity-aware gateway using signed headers:
+
+```bash
+export SOCMIND_TRUSTED_PROXY_SECRET='shared-secret'
+
+socmind web events.jsonl \
+  --postgres-dsn "$SOCMIND_POSTGRES_DSN" \
+  --auth-mode trusted-proxy \
+  --enterprise-audit enterprise-audit.jsonl \
+  --host 0.0.0.0
+```
+
+Identity is mapped to RBAC roles and mutating actions use the authenticated subject as the audit actor.
+
+### Tamper-evident audit
+
+```bash
+socmind audit-verify enterprise-audit.jsonl
+```
+
+### Backup and retention
+
+```bash
+socmind backup socmind.db -o backups/socmind.db
+socmind retention ./exports --days 90
+socmind retention ./exports --days 90 --apply
+```
+
+Retention is dry-run by default.
+
+Detailed guide: [Enterprise Foundation](docs/enterprise-foundation.md)
 
 ## v1.4 Evidence Contradiction & Case Similarity
 
@@ -664,6 +736,7 @@ socmind analyze normalized.jsonl \
 - [1.2 Hardened Portfolio Release](docs/release-v1.2.md)
 - [Investigation Replay Engine](docs/investigation-replay-engine.md)
 - [Evidence Contradiction & Case Similarity](docs/evidence-contradiction-case-similarity.md)
+- [Enterprise Foundation](docs/enterprise-foundation.md)
 
 ## CI quality gate
 
@@ -689,13 +762,16 @@ Every pull request validates:
 
 The initial portfolio roadmap is complete through **v1.2**. **v1.3** adds SOCMind's signature investigation-to-detection feedback loop. **v1.4** adds contradiction-aware reasoning and explainable historical case reuse.
 
-Future work is optional expansion rather than a prerequisite for the portfolio release:
+v1.5 adds the enterprise foundation: RBAC, trusted-proxy identity, PostgreSQL case storage, tamper-evident audit, backup and retention tooling.
 
-- organization-specific SSO / RBAC
+Future expansion remains organization-specific:
+
+- native OIDC/SAML login and automated IdP group mapping
+- Kubernetes/HA deployment and PostgreSQL failover
+- centralized immutable audit shipping
+- secrets-manager integrations
 - ticketing and SOAR connectors
-- richer MISP/OpenCTI enrichment profiles
 - larger detection packs and regression corpus
-- deployment patterns for team/multi-user environments
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 

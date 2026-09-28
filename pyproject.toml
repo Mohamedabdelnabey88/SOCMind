@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "socmind"
-version = "1.4.0"
+version = "1.5.0"
 description = "Cross-platform SOC Tier 1/2 investigation, detection-engineering and integration toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,7 +25,8 @@ dependencies = []
 evtx = ["python-evtx>=0.8.1"]
 sigma = ["PyYAML>=6.0.2"]
 web = ["fastapi>=0.116.0", "uvicorn>=0.35.0"]
-all = ["python-evtx>=0.8.1", "PyYAML>=6.0.2", "fastapi>=0.116.0", "uvicorn>=0.35.0"]
+enterprise = ["psycopg[binary]>=3.2.0"]
+all = ["python-evtx>=0.8.1", "PyYAML>=6.0.2", "fastapi>=0.116.0", "uvicorn>=0.35.0", "psycopg[binary]>=3.2.0"]
 
 [project.scripts]
 socmind = "socmind.cli:main"

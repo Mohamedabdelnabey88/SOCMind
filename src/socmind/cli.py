@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+from .audit_chain import verify_chain
 from .benchmark import run_benchmark
 from .adapters import (
     parse_auditd,
@@ -31,6 +32,8 @@ from .detections import evaluate_rule, load_rule, load_rules
 from .demo import create_demo
 from .detection_replay import detection_replay_payload, render_detection_replay
 from .doctor import doctor_payload, run_doctor
+from .enterprise_auth import sign_trusted_proxy_identity
+from .enterprise_ops import backup_sqlite, postgres_schema, render_retention, retention_scan
 from .engine import analyze
 from .enrichment import LocalIntelProvider, enrich_iocs
 from .escalation import export_escalation_package
@@ -46,8 +49,10 @@ from .quality_gate import load_checklist, quality_payload, render_quality_review
 from .ioc import extract_iocs
 from .notes import append_note
 from .process_tree import render_process_tree
+from .postgres_store import initialize_postgres, postgres_health
 from .provenance import fingerprint
 from .regression import generate_regression_package
+from .rbac import ROLE_PERMISSIONS
 from .replay import replay_payload, render_replay
 from .report import render_text
 from .rule_tests import run_rule_test
@@ -91,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="SOCMind 1.4.0")
+    parser.add_argument("--version", action="version", version="SOCMind 1.5.0")
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show task-oriented SOCMind help")
@@ -186,11 +191,15 @@ def build_parser() -> argparse.ArgumentParser:
     web_cmd.add_argument("--host", default="127.0.0.1")
     web_cmd.add_argument("--port", type=int, default=8765)
     web_cmd.add_argument("--command-db", help="Optional SQLite SOC command-center database")
+    web_cmd.add_argument("--postgres-dsn", help="Optional PostgreSQL enterprise case-store DSN; prefer SOCMIND_POSTGRES_DSN")
     web_cmd.add_argument("--rules", default="detections")
     web_cmd.add_argument("--dispositions")
     web_cmd.add_argument("--proposed-rules", help="Optional proposed rule pack for IRE what-if comparison")
     web_cmd.add_argument("--quality-checklist", help="Optional analyst checklist JSON for IRE quality gate")
     web_cmd.add_argument("--api-token", help="Optional API token; prefer SOCMIND_API_TOKEN environment variable")
+    web_cmd.add_argument("--auth-mode", choices=["local-token", "trusted-proxy"], default="local-token")
+    web_cmd.add_argument("--api-token-role", choices=sorted(ROLE_PERMISSIONS), default="admin")
+    web_cmd.add_argument("--enterprise-audit", help="Optional tamper-evident enterprise audit JSONL path")
     web_cmd.add_argument("--allow-unsafe-remote", action="store_true", help="Explicitly allow non-loopback bind without token (isolated lab only)")
 
     case_init = sub.add_parser("case-init", help="Create an operational SOC case record")
@@ -369,6 +378,37 @@ def build_parser() -> argparse.ArgumentParser:
     similar_cmd.add_argument("--limit", type=int, default=5)
     similar_cmd.add_argument("--exclude-case-id")
     similar_cmd.add_argument("--json", action="store_true")
+
+    enterprise_info = sub.add_parser("enterprise-info", help="Show enterprise roles and permissions")
+    enterprise_info.add_argument("--json", action="store_true")
+
+    trusted_sign = sub.add_parser("trusted-sign", help="Sign a trusted-proxy identity for integration testing")
+    trusted_sign.add_argument("--subject", required=True)
+    trusted_sign.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+
+    audit_verify = sub.add_parser("audit-verify", help="Verify a tamper-evident enterprise audit chain")
+    audit_verify.add_argument("path")
+    audit_verify.add_argument("--json", action="store_true")
+
+    backup_cmd = sub.add_parser("backup", help="Create a point-in-time backup of the local SQLite command database")
+    backup_cmd.add_argument("database")
+    backup_cmd.add_argument("-o", "--output", required=True)
+
+    retention_cmd = sub.add_parser("retention", help="Preview or apply file retention to exported investigation artifacts")
+    retention_cmd.add_argument("directory")
+    retention_cmd.add_argument("--days", type=int, required=True)
+    retention_cmd.add_argument("--apply", action="store_true")
+    retention_cmd.add_argument("--json", action="store_true")
+
+    pg_schema = sub.add_parser("postgres-schema", help="Write the PostgreSQL enterprise schema")
+    pg_schema.add_argument("-o", "--output")
+
+    pg_init = sub.add_parser("postgres-init", help="Initialize SOCMind enterprise tables in PostgreSQL")
+    pg_init.add_argument("--dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN environment variable")
+
+    pg_health = sub.add_parser("postgres-health", help="Check PostgreSQL enterprise readiness")
+    pg_health.add_argument("--dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN environment variable")
+    pg_health.add_argument("--json", action="store_true")
 
     return parser
 
@@ -909,6 +949,89 @@ def main() -> None:
             ))
         return
 
+    if args.command == "enterprise-info":
+        payload = {
+            role: sorted(permissions)
+            for role, permissions in ROLE_PERMISSIONS.items()
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print("SOCMind Enterprise Roles")
+            print("========================")
+            for role, permissions in payload.items():
+                print(f"{role}: {', '.join(permissions)}")
+        return
+
+    if args.command == "trusted-sign":
+        secret = os.environ.get("SOCMIND_TRUSTED_PROXY_SECRET")
+        if not secret:
+            raise SystemExit("Set SOCMIND_TRUSTED_PROXY_SECRET in the environment.")
+        print(sign_trusted_proxy_identity(secret, args.subject, args.role))
+        return
+
+    if args.command == "audit-verify":
+        valid, records, error = verify_chain(args.path)
+        payload = {"valid": valid, "records": records, "error": error}
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"SOCMind Audit Chain | {'VALID' if valid else 'INVALID'} | records={records}")
+            if error:
+                print(f"error={error}")
+        raise SystemExit(0 if valid else 1)
+
+    if args.command == "backup":
+        target = backup_sqlite(args.database, args.output)
+        print(f"Backup -> {target}")
+        return
+
+    if args.command == "retention":
+        result = retention_scan(args.directory, days=args.days, apply=args.apply)
+        if args.json:
+            print(json.dumps({
+                "scanned": result.scanned,
+                "eligible": result.eligible,
+                "deleted": result.deleted,
+                "dry_run": result.dry_run,
+            }, indent=2))
+        else:
+            print(render_retention(result))
+        return
+
+    if args.command == "postgres-schema":
+        schema = postgres_schema()
+        if args.output:
+            Path(args.output).write_text(schema, encoding="utf-8")
+            print(f"PostgreSQL schema -> {args.output}")
+        else:
+            print(schema)
+        return
+
+    if args.command == "postgres-init":
+        dsn = args.dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
+        if not dsn:
+            raise SystemExit("Set SOCMIND_POSTGRES_DSN or pass --dsn.")
+        initialize_postgres(dsn)
+        print("PostgreSQL enterprise schema initialized.")
+        return
+
+    if args.command == "postgres-health":
+        dsn = args.dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
+        if not dsn:
+            raise SystemExit("Set SOCMIND_POSTGRES_DSN or pass --dsn.")
+        result = postgres_health(dsn)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print("SOCMind PostgreSQL Health")
+            print("=========================")
+            print(f"database={result['database']}")
+            print(f"user={result['user']}")
+            print(f"socmind_tables={result['socmind_tables']}")
+            print(f"ready={result['ready']}")
+        raise SystemExit(0 if result["ready"] else 1)
+
     if args.command == "web":
         try:
             import uvicorn
@@ -916,23 +1039,34 @@ def main() -> None:
             raise RuntimeError("Web dashboard requires: pip install 'socmind[web]'") from exc
         from .webapp import create_app
         api_token = args.api_token or os.environ.get("SOCMIND_API_TOKEN")
+        trusted_proxy_secret = os.environ.get("SOCMIND_TRUSTED_PROXY_SECRET")
+        auth_configured = (
+            args.auth_mode == "trusted-proxy" and bool(trusted_proxy_secret)
+        )
         try:
             validate_web_binding(
                 args.host,
                 api_token=api_token,
+                auth_configured=auth_configured,
                 allow_unsafe_remote=args.allow_unsafe_remote,
             )
         except ValueError as exc:
             raise SystemExit(str(exc))
+        postgres_dsn = args.postgres_dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
         app = create_app(
             args.events,
             case_id=args.case_id,
             command_db=args.command_db,
+            postgres_dsn=postgres_dsn,
             rules_dir=args.rules,
             dispositions_path=args.dispositions,
             api_token=api_token,
             proposed_rules_dir=args.proposed_rules,
             quality_checklist_path=args.quality_checklist,
+            auth_mode=args.auth_mode,
+            api_token_role=args.api_token_role,
+            trusted_proxy_secret=trusted_proxy_secret,
+            enterprise_audit_path=args.enterprise_audit,
         )
         print(f"SOCMind Web -> http://{args.host}:{args.port}")
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

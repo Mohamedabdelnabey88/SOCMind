@@ -1,6 +1,6 @@
 import json
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from socmind.integrations import ElasticClient, WazuhClient, integration_check
@@ -17,16 +17,22 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(data)
+        self.wfile.flush()
+        self.close_connection = True
 
     def do_POST(self):
         if self.path.startswith("/security/user/authenticate"):
             data = b"jwt-demo-token"
             self.send_response(200)
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(data)
+            self.wfile.flush()
+            self.close_connection = True
         elif self.path.endswith("/_search"):
             self._json({"hits": {"hits": [{"_source": {"@timestamp": "2026-09-28T00:00:00Z", "host": {"name": "WS-01"}}}]}})
         elif self.path == "/attributes/restSearch":
@@ -48,7 +54,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def server():
-    httpd = HTTPServer(("127.0.0.1", 0), Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     return httpd

@@ -1,0 +1,405 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from .case_workflow import ALLOWED, CaseState
+from .postgres_store import _psycopg, initialize_postgres
+from .sla import evaluate_sla
+
+
+@dataclass(frozen=True, slots=True)
+class EnterpriseCase:
+    case_id: str
+    state: str
+    priority: str
+    owner: str | None
+    opened_at: str
+    updated_at: str
+    source: str | None = None
+    title: str | None = None
+    acknowledged_at: str | None = None
+    evidence_path: str | None = None
+
+
+def _iso(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _row_to_case(row: dict) -> EnterpriseCase:
+    return EnterpriseCase(
+        case_id=row["case_id"],
+        state=row["state"],
+        priority=row["priority"],
+        owner=row.get("owner"),
+        opened_at=_iso(row["opened_at"]) or "",
+        updated_at=_iso(row["updated_at"]) or "",
+        source=row.get("source"),
+        title=row.get("title"),
+        acknowledged_at=_iso(row.get("acknowledged_at")),
+        evidence_path=row.get("evidence_path"),
+    )
+
+
+def _connect(dsn: str):
+    psycopg = _psycopg()
+    from psycopg.rows import dict_row
+    return psycopg.connect(dsn, row_factory=dict_row)
+
+
+def upsert_case_pg(
+    dsn: str,
+    case: CaseState,
+    *,
+    source: str | None = None,
+    title: str | None = None,
+    evidence_path: str | None = None,
+) -> None:
+    initialize_postgres(dsn)
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO cases(
+                  case_id,state,priority,owner,opened_at,updated_at,
+                  source,title,acknowledged_at,evidence_path
+                )
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NULL,%s)
+                ON CONFLICT(case_id) DO UPDATE SET
+                  state=EXCLUDED.state,
+                  priority=EXCLUDED.priority,
+                  owner=EXCLUDED.owner,
+                  updated_at=EXCLUDED.updated_at,
+                  source=COALESCE(EXCLUDED.source,cases.source),
+                  title=COALESCE(EXCLUDED.title,cases.title),
+                  evidence_path=COALESCE(EXCLUDED.evidence_path,cases.evidence_path)
+                """,
+                (
+                    case.case_id,
+                    case.state,
+                    case.priority,
+                    case.owner,
+                    case.opened_at,
+                    case.updated_at,
+                    source,
+                    title,
+                    evidence_path,
+                ),
+            )
+        conn.commit()
+
+
+def _require_case(cur, case_id: str) -> dict:
+    cur.execute("SELECT * FROM cases WHERE case_id=%s", (case_id,))
+    row = cur.fetchone()
+    if row is None:
+        raise ValueError(f"Unknown case: {case_id}")
+    return row
+
+
+def acknowledge_case_pg(
+    dsn: str,
+    case_id: str,
+    *,
+    actor: str = "analyst",
+) -> None:
+    now = datetime.now(timezone.utc)
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            _require_case(cur, case_id)
+            cur.execute(
+                """
+                UPDATE cases
+                SET acknowledged_at=COALESCE(acknowledged_at,%s), updated_at=%s
+                WHERE case_id=%s
+                """,
+                (now, now, case_id),
+            )
+            cur.execute(
+                """
+                INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
+                VALUES(%s,%s,%s,%s,%s)
+                """,
+                (case_id, actor, "acknowledged", "Case acknowledged", now),
+            )
+        conn.commit()
+
+
+def assign_case_pg(
+    dsn: str,
+    case_id: str,
+    owner: str,
+    *,
+    actor: str = "analyst",
+) -> None:
+    owner = owner.strip()
+    actor = actor.strip() or "analyst"
+    if not owner:
+        raise ValueError("Owner cannot be empty")
+    if len(owner) > 120:
+        raise ValueError("Owner must be 120 characters or fewer")
+    if len(actor) > 120:
+        raise ValueError("Actor must be 120 characters or fewer")
+    now = datetime.now(timezone.utc)
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            _require_case(cur, case_id)
+            cur.execute(
+                "UPDATE cases SET owner=%s, updated_at=%s WHERE case_id=%s",
+                (owner, now, case_id),
+            )
+            cur.execute(
+                """
+                INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
+                VALUES(%s,%s,%s,%s,%s)
+                """,
+                (case_id, actor, "assigned", f"Assigned to {owner}", now),
+            )
+        conn.commit()
+
+
+def transition_case_pg(
+    dsn: str,
+    case_id: str,
+    target: str,
+    *,
+    actor: str = "analyst",
+) -> None:
+    actor = actor.strip() or "analyst"
+    if len(actor) > 120:
+        raise ValueError("Actor must be 120 characters or fewer")
+    now = datetime.now(timezone.utc)
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            row = _require_case(cur, case_id)
+            current = row["state"]
+            if target not in ALLOWED.get(current, set()):
+                raise ValueError(f"Invalid transition: {current} -> {target}")
+            cur.execute(
+                "UPDATE cases SET state=%s, updated_at=%s WHERE case_id=%s",
+                (target, now, case_id),
+            )
+            cur.execute(
+                """
+                INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
+                VALUES(%s,%s,%s,%s,%s)
+                """,
+                (case_id, actor, "state-transition", f"{current} -> {target}", now),
+            )
+        conn.commit()
+
+
+def add_case_note_pg(
+    dsn: str,
+    case_id: str,
+    *,
+    author: str,
+    text: str,
+    disposition: str | None = None,
+) -> int:
+    clean = text.strip()
+    author = author.strip() or "analyst"
+    if not clean:
+        raise ValueError("Note text cannot be empty")
+    if len(clean) > 5000:
+        raise ValueError("Note text must be 5000 characters or fewer")
+    if len(author) > 120:
+        raise ValueError("Author must be 120 characters or fewer")
+    if disposition is not None and len(str(disposition)) > 80:
+        raise ValueError("Disposition must be 80 characters or fewer")
+    now = datetime.now(timezone.utc)
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            _require_case(cur, case_id)
+            cur.execute(
+                """
+                INSERT INTO case_notes(case_id,author,text,disposition,created_at)
+                VALUES(%s,%s,%s,%s,%s)
+                RETURNING id
+                """,
+                (case_id, author, clean, disposition, now),
+            )
+            note_id = int(cur.fetchone()["id"])
+            cur.execute(
+                """
+                INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
+                VALUES(%s,%s,%s,%s,%s)
+                """,
+                (case_id, author, "note-added", clean[:200], now),
+            )
+        conn.commit()
+    return note_id
+
+
+def case_detail_pg(dsn: str, case_id: str) -> dict:
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            case = _require_case(cur, case_id)
+            cur.execute(
+                "SELECT * FROM case_notes WHERE case_id=%s ORDER BY created_at DESC",
+                (case_id,),
+            )
+            notes = cur.fetchall()
+            cur.execute(
+                "SELECT * FROM case_audit WHERE case_id=%s ORDER BY timestamp DESC",
+                (case_id,),
+            )
+            audit = cur.fetchall()
+
+    case_payload = dict(case)
+    for key in ("opened_at", "updated_at", "acknowledged_at"):
+        case_payload[key] = _iso(case_payload.get(key))
+    for row in notes:
+        row["created_at"] = _iso(row.get("created_at"))
+    for row in audit:
+        row["timestamp"] = _iso(row.get("timestamp"))
+    return {"case": case_payload, "notes": notes, "audit": audit}
+
+
+def list_cases_pg(
+    dsn: str,
+    *,
+    query: str | None = None,
+    priority: str | None = None,
+    state: str | None = None,
+    owner: str | None = None,
+) -> list[EnterpriseCase]:
+    sql = "SELECT * FROM cases WHERE TRUE"
+    params: list[str] = []
+    if query:
+        sql += " AND (case_id ILIKE %s OR COALESCE(title,'') ILIKE %s OR COALESCE(source,'') ILIKE %s)"
+        needle = f"%{query}%"
+        params += [needle, needle, needle]
+    if priority:
+        sql += " AND priority=%s"
+        params.append(priority)
+    if state:
+        sql += " AND state=%s"
+        params.append(state)
+    if owner:
+        if owner == "Unassigned":
+            sql += " AND owner IS NULL"
+        else:
+            sql += " AND owner=%s"
+            params.append(owner)
+    sql += " ORDER BY CASE priority WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 ELSE 3 END, opened_at"
+
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+    return [_row_to_case(dict(row)) for row in rows]
+
+
+def command_center_snapshot_pg(
+    dsn: str,
+    *,
+    query: str | None = None,
+    priority: str | None = None,
+    state: str | None = None,
+    owner: str | None = None,
+) -> dict:
+    all_cases = list_cases_pg(dsn)
+    cases = list_cases_pg(
+        dsn,
+        query=query,
+        priority=priority,
+        state=state,
+        owner=owner,
+    )
+    active_all = [
+        case
+        for case in all_cases
+        if case.state not in {"resolved", "false-positive"}
+    ]
+    breached = [
+        case.case_id
+        for case in active_all
+        if evaluate_sla(case.opened_at, priority=case.priority).breached
+    ]
+
+    owner_counts: dict[str, int] = {}
+    for case in active_all:
+        key = case.owner or "Unassigned"
+        owner_counts[key] = owner_counts.get(key, 0) + 1
+
+    mtta_values: list[int] = []
+    for case in all_cases:
+        if case.acknowledged_at:
+            opened = datetime.fromisoformat(case.opened_at.replace("Z", "+00:00"))
+            ack = datetime.fromisoformat(case.acknowledged_at.replace("Z", "+00:00"))
+            mtta_values.append(max(0, int((ack - opened).total_seconds() // 60)))
+
+    resolved = [case for case in all_cases if case.state == "resolved"]
+    mttr_values: list[int] = []
+    for case in resolved:
+        opened = datetime.fromisoformat(case.opened_at.replace("Z", "+00:00"))
+        closed = datetime.fromisoformat(case.updated_at.replace("Z", "+00:00"))
+        mttr_values.append(max(0, int((closed - opened).total_seconds() // 60)))
+
+    active_filtered = [
+        case
+        for case in cases
+        if case.state not in {"resolved", "false-positive"}
+    ]
+    sla_by_case = {
+        case.case_id: evaluate_sla(case.opened_at, priority=case.priority)
+        for case in active_filtered
+    }
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "total": len(all_cases),
+            "active": len(active_all),
+            "p1_active": sum(1 for case in active_all if case.priority == "P1"),
+            "unassigned": sum(1 for case in active_all if not case.owner),
+            "sla_breached": len(breached),
+            "resolved": len(resolved),
+            "mtta_minutes": round(sum(mtta_values) / len(mtta_values), 1)
+            if mtta_values
+            else None,
+            "mttr_minutes": round(sum(mttr_values) / len(mttr_values), 1)
+            if mttr_values
+            else None,
+        },
+        "filters": {
+            "query": query,
+            "priority": priority,
+            "state": state,
+            "owner": owner,
+        },
+        "sla_breaches": breached,
+        "workload": [
+            {"owner": key, "active_cases": count}
+            for key, count in sorted(
+                owner_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ],
+        "queue": [
+            {
+                "case_id": case.case_id,
+                "title": case.title or case.case_id,
+                "state": case.state,
+                "priority": case.priority,
+                "owner": case.owner,
+                "source": case.source,
+                "opened_at": case.opened_at,
+                "updated_at": case.updated_at,
+                "acknowledged_at": case.acknowledged_at,
+                "has_evidence": bool(case.evidence_path),
+                "sla": {
+                    "breached": sla_by_case[case.case_id].breached,
+                    "remaining_minutes": sla_by_case[case.case_id].remaining_minutes,
+                }
+                if case.case_id in sla_by_case
+                else None,
+            }
+            for case in cases
+        ],
+    }

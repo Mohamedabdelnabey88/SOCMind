@@ -4,7 +4,7 @@ SOCMind is a defensive Blue Team project and may process sensitive security tele
 
 ## Supported release
 
-The current supported portfolio release is **1.2.x**.
+The current supported release line is **1.5.x**.
 
 ## Reporting a vulnerability
 
@@ -37,16 +37,19 @@ SOCMind is designed with these defaults:
 
 ## Production boundary
 
-SOCMind 1.2 is a local analyst/portfolio workbench. A multi-user production deployment should additionally provide:
+SOCMind 1.5 adds an enterprise foundation with RBAC, trusted-proxy identity, PostgreSQL case storage, tamper-evident audit, backup, and retention tooling.
 
-- organizational SSO/identity
-- RBAC
+A production deployment should still provide organization-specific:
+
+- identity-aware reverse proxy backed by SSO/OIDC/SAML
 - TLS termination
 - secrets management
-- centralized audit storage
-- backup/restore procedures
+- centralized immutable/WORM audit storage
+- PostgreSQL replication/backups/failover
+- legal-hold-aware retention
 - host hardening
 - network segmentation
 - monitoring and patch management
+- load/soak validation for the intended analyst and telemetry scale
 
-The built-in local API token is not a replacement for enterprise identity and access management.
+The built-in local API token is intended for local/small deployments. Trusted-proxy mode requires a correctly secured authenticating proxy and shared signing secret.
