@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-from .benchmark import benchmark_payload, run_benchmark
+from .benchmark import run_benchmark
 from .adapters import (
     parse_auditd,
     parse_auth_log,
