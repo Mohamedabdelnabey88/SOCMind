@@ -151,6 +151,8 @@ def build_parser() -> argparse.ArgumentParser:
     web_cmd.add_argument("--host", default="127.0.0.1")
     web_cmd.add_argument("--port", type=int, default=8765)
     web_cmd.add_argument("--command-db", help="Optional SQLite SOC command-center database")
+    web_cmd.add_argument("--rules", default="detections")
+    web_cmd.add_argument("--dispositions")
 
     case_init = sub.add_parser("case-init", help="Create an operational SOC case record")
     case_init.add_argument("output")
@@ -515,7 +517,7 @@ def main() -> None:
         except ImportError as exc:
             raise RuntimeError("Web dashboard requires: pip install 'socmind[web]'") from exc
         from .webapp import create_app
-        app = create_app(args.events, case_id=args.case_id, command_db=args.command_db)
+        app = create_app(args.events, case_id=args.case_id, command_db=args.command_db, rules_dir=args.rules, dispositions_path=args.dispositions)
         print(f"SOCMind Web -> http://{args.host}:{args.port}")
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
         return
