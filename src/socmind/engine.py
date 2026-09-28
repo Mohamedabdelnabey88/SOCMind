@@ -96,6 +96,10 @@ def analyze(events: list[Event]) -> list[Finding]:
             event
             for event in host_events
             if (event.process or "").lower().endswith("powershell.exe")
+            and (
+                event.event_id == "1"
+                or bool(event.command_line)
+            )
         ]
         for ps_event in powershell:
             reasons: list[str] = []
