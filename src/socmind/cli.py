@@ -28,6 +28,7 @@ from .command_center import (
 )
 from .detections import evaluate_rule, load_rule, load_rules
 from .demo import create_demo
+from .detection_replay import detection_replay_payload, render_detection_replay
 from .doctor import doctor_payload, run_doctor
 from .engine import analyze
 from .enrichment import LocalIntelProvider, enrich_iocs
@@ -40,10 +41,13 @@ from .hypothesis import generate_hypotheses
 from .integrations import ElasticClient, WazuhClient, integration_check
 from .io import load_jsonl
 from .lead_metrics import lead_snapshot
+from .quality_gate import load_checklist, quality_payload, render_quality_review
 from .ioc import extract_iocs
 from .notes import append_note
 from .process_tree import render_process_tree
 from .provenance import fingerprint
+from .regression import generate_regression_package
+from .replay import replay_payload, render_replay
 from .report import render_text
 from .rule_tests import run_rule_test
 from .sla import evaluate_sla
@@ -51,6 +55,7 @@ from .shift_brief import render_shift_brief
 from .timeline import render_timeline
 from .threat_intel_live import MISPProvider, OpenCTIClient
 from .tuning import load_dispositions, suggest_tuning
+from .whatif import compare_rule_packs, render_what_if
 from .workspace import build_workspace
 
 
@@ -84,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="SOCMind 1.2.0")
+    parser.add_argument("--version", action="version", version="SOCMind 1.3.0")
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show task-oriented SOCMind help")
@@ -317,6 +322,32 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_cmd = sub.add_parser("benchmark", help="Run a repeatable local investigation benchmark")
     benchmark_cmd.add_argument("--events", type=int, default=5000)
     benchmark_cmd.add_argument("--json", action="store_true")
+
+    replay_cmd = sub.add_parser("replay", help="Replay how findings and hypotheses emerged over time")
+    replay_cmd.add_argument("events")
+    replay_cmd.add_argument("--json", action="store_true")
+
+    detection_replay_cmd = sub.add_parser("detection-replay", help="Replay an incident against the current detection pack")
+    detection_replay_cmd.add_argument("events")
+    detection_replay_cmd.add_argument("--rules", default="detections")
+    detection_replay_cmd.add_argument("--json", action="store_true")
+
+    what_if_cmd = sub.add_parser("what-if", help="Compare current and proposed detection packs against the same incident")
+    what_if_cmd.add_argument("events")
+    what_if_cmd.add_argument("--current-rules", default="detections")
+    what_if_cmd.add_argument("--proposed-rules", required=True)
+    what_if_cmd.add_argument("--json", action="store_true")
+
+    review_cmd = sub.add_parser("case-review", help="Evaluate investigation completeness without scoring the analyst")
+    review_cmd.add_argument("events")
+    review_cmd.add_argument("--checklist")
+    review_cmd.add_argument("--json", action="store_true")
+
+    learn_cmd = sub.add_parser("learn-from-case", help="Generate a detection-engineering regression package from a confirmed case")
+    learn_cmd.add_argument("events")
+    learn_cmd.add_argument("--rules", default="detections")
+    learn_cmd.add_argument("--case-id", required=True)
+    learn_cmd.add_argument("-o", "--output", required=True)
 
     return parser
 
@@ -770,6 +801,62 @@ def main() -> None:
             print(f"findings={result.findings}")
             print(f"elapsed={result.elapsed_seconds:.6f}s")
             print(f"throughput={result.events_per_second:.1f} events/s")
+        return
+
+    if args.command == "replay":
+        events = load_jsonl(args.events)
+        if args.json:
+            print(json.dumps(replay_payload(events), indent=2))
+        else:
+            print(render_replay(events))
+        return
+
+    if args.command == "detection-replay":
+        events = load_jsonl(args.events)
+        rules = load_rules(args.rules)
+        if args.json:
+            print(json.dumps(detection_replay_payload(events, rules), indent=2))
+        else:
+            print(render_detection_replay(events, rules))
+        return
+
+    if args.command == "what-if":
+        events = load_jsonl(args.events)
+        current_rules = load_rules(args.current_rules)
+        proposed_rules = load_rules(args.proposed_rules)
+        if args.json:
+            result = compare_rule_packs(events, current_rules, proposed_rules)
+            print(json.dumps({
+                "current": result.current,
+                "proposed": result.proposed,
+                "first_detection_step_improvement": result.first_detection_step_improvement,
+                "visibility_delta": result.visibility_delta,
+                "blind_step_delta": result.blind_step_delta,
+                "newly_covered_techniques": result.newly_covered_techniques,
+            }, indent=2))
+        else:
+            print(render_what_if(events, current_rules, proposed_rules))
+        return
+
+    if args.command == "case-review":
+        events = load_jsonl(args.events)
+        checklist = load_checklist(args.checklist)
+        if args.json:
+            print(json.dumps(quality_payload(events, checklist=checklist), indent=2))
+        else:
+            print(render_quality_review(events, checklist=checklist))
+        return
+
+    if args.command == "learn-from-case":
+        events = load_jsonl(args.events)
+        rules = load_rules(args.rules)
+        target = generate_regression_package(
+            events,
+            rules,
+            args.output,
+            case_id=args.case_id,
+        )
+        print(f"Detection regression package -> {target}")
         return
 
     if args.command == "web":
