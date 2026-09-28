@@ -11,6 +11,35 @@ from .ioc import extract_iocs
 from .models import Event
 
 
+CHECKLIST_KEYS = frozenset({
+    "iocs_reviewed",
+    "process_ancestry_reviewed",
+    "contradictions_reviewed",
+    "persistence_validated",
+    "scope_validated",
+    "detection_feedback",
+    "handoff_complete",
+})
+
+
+def normalize_checklist(value: dict | None) -> dict[str, bool]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("Quality checklist must be a JSON object")
+    unknown = sorted(set(value) - CHECKLIST_KEYS)
+    if unknown:
+        raise ValueError(
+            "Unknown quality checklist field(s): " + ", ".join(unknown)
+        )
+    normalized: dict[str, bool] = {}
+    for key, raw in value.items():
+        if not isinstance(raw, bool):
+            raise ValueError(f"Quality checklist field {key!r} must be boolean")
+        normalized[key] = raw
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class QualityItem:
     key: str
@@ -55,7 +84,7 @@ def review_investigation(
     *,
     checklist: dict | None = None,
 ) -> QualityReview:
-    checklist = checklist or {}
+    checklist = normalize_checklist(checklist)
     findings = analyze(events)
     hypotheses = generate_hypotheses(findings)
     contradictions = contradiction_payload(events)
@@ -235,9 +264,7 @@ def load_checklist(path: str | Path | None) -> dict:
     if path is None:
         return {}
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError("Quality checklist must be a JSON object")
-    return raw
+    return normalize_checklist(raw)
 
 
 def quality_payload(events: list[Event], *, checklist: dict | None = None) -> dict:
