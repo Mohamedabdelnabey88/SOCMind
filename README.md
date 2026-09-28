@@ -148,6 +148,12 @@ Retention is dry-run by default.
 
 Detailed guide: [Enterprise Foundation](docs/enterprise-foundation.md)
 
+## Feature Maturity Upgrade
+
+The current development line focuses on deepening existing capabilities rather than adding shallow features. Detection Replay now includes per-technique timing and rule contribution; investigation quality is applicability-aware; historical similarity reports evidence breadth/confidence; contradiction evidence includes provenance; and detection-health metrics expose sample sufficiency and uncertainty.
+
+Detailed guide: [Feature Maturity Upgrade](docs/feature-maturity-upgrade.md)
+
 ## v1.4 Evidence Contradiction & Case Similarity
 
 SOCMind now adds an analyst reasoning layer designed to reduce confirmation bias and reuse prior investigation knowledge.
