@@ -54,6 +54,10 @@ jobs:
       - run: socmind command-note socmind.db CI-OPS-001 --author senior-analyst --text "Reviewed linked evidence" --disposition needs-review
       - run: socmind command-show socmind.db CI-OPS-001
       - run: socmind demo-init -o ci-demo
+      - run: socmind help
+      - run: socmind help integrations
+      - run: socmind doctor
+      - run: socmind --version
 
   kali:
     runs-on: ubuntu-latest
@@ -100,6 +104,9 @@ jobs:
           .venv/bin/socmind command-note kali-soc.db KALI-OPS-001 --author tier2 --text "Validated linked Linux evidence"
           .venv/bin/socmind command-show kali-soc.db KALI-OPS-001
           .venv/bin/socmind demo-init -o kali-demo
+          .venv/bin/socmind help integrations
+          .venv/bin/socmind doctor
+          .venv/bin/socmind --version
       - name: Exercise web dashboard on Kali
         shell: bash
         run: |
