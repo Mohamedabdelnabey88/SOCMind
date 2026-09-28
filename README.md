@@ -24,7 +24,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v1.3 — Investigation Replay Engine**
+> **v1.4 — Evidence Contradiction & Case Similarity**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -75,6 +75,35 @@ socmind analyze examples/linux_attack_chain.jsonl \
 ```
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
+
+## v1.4 Evidence Contradiction & Case Similarity
+
+SOCMind now adds an analyst reasoning layer designed to reduce confirmation bias and reuse prior investigation knowledge.
+
+Review supporting evidence, explicit alternative context, validation gaps, and unresolved questions separately:
+
+```bash
+socmind contradictions examples/attack_chain.jsonl
+```
+
+Find explainable historical cases:
+
+```bash
+socmind similar-cases examples/attack_chain.jsonl \
+  --database socmind-demo/socmind-demo.db \
+  --limit 5
+```
+
+Case similarity is based on deterministic overlap across:
+
+- ATT&CK techniques
+- event IDs
+- processes
+- IOC values
+
+A similarity score means evidence/behavior overlap. It does **not** claim the same attacker, campaign, malware, or root cause.
+
+Detailed guide: [Evidence Contradiction & Case Similarity](docs/evidence-contradiction-case-similarity.md)
 
 ## v1.3 Investigation Replay Engine (IRE)
 
@@ -634,6 +663,7 @@ socmind analyze normalized.jsonl \
 - [CLI Reference](docs/cli-reference.md)
 - [1.2 Hardened Portfolio Release](docs/release-v1.2.md)
 - [Investigation Replay Engine](docs/investigation-replay-engine.md)
+- [Evidence Contradiction & Case Similarity](docs/evidence-contradiction-case-similarity.md)
 
 ## CI quality gate
 
@@ -657,7 +687,7 @@ Every pull request validates:
 
 ## Roadmap
 
-The initial portfolio roadmap is complete through **v1.2**. **v1.3** adds SOCMind's signature investigation-to-detection feedback loop.
+The initial portfolio roadmap is complete through **v1.2**. **v1.3** adds SOCMind's signature investigation-to-detection feedback loop. **v1.4** adds contradiction-aware reasoning and explainable historical case reuse.
 
 Future work is optional expansion rather than a prerequisite for the portfolio release:
 
