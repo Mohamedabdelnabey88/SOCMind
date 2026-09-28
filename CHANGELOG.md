@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.6.0 — Professional Feature Maturity
+
+- technique-aligned Detection Replay with per-technique blind-time metrics
+- distinguish static ATT&CK coverage from rules that actually triggered
+- operational investigation readiness states: READY / NEEDS_REVIEW / BLOCKED
+- explicit analyst sign-off for scope, contradictions, IOC review, persistence and handoff
+- per-case quality checklist persistence in SQLite and PostgreSQL
+- optional closure enforcement that blocks resolved transitions when required investigation work is incomplete
+- explainable case-similarity component scores, thresholds and strength labels
+- normalized similarity weights across available evidence dimensions
+- case queue filtering and pagination in CLI/Web
+- detection rule-pack audit for duplicate IDs, metadata, ATT&CK tags and supported conditions
+- Detection What-If now requires rule packs with no audit errors
+- SOC Lead web view surfaces rule-pack quality
+
+
 ## Unreleased — Professional Readiness Audit
 
 - keep IRE replay/quality/reasoning usable when RBAC denies Detection What-If
