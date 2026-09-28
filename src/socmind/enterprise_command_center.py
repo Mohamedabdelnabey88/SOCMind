@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .case_workflow import ALLOWED, CaseState
 from .postgres_store import _psycopg, initialize_postgres
+from .quality_gate import normalize_checklist
 from .sla import evaluate_sla
 
 
@@ -238,6 +240,82 @@ def add_case_note_pg(
     return note_id
 
 
+def save_case_quality_pg(
+    dsn: str,
+    case_id: str,
+    checklist: dict,
+    *,
+    actor: str,
+) -> dict:
+    normalized = normalize_checklist(checklist)
+    clean_actor = actor.strip() or "analyst"
+    if len(clean_actor) > 120:
+        raise ValueError("Actor must be 120 characters or fewer")
+    now = datetime.now(timezone.utc)
+    payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            _require_case(cur, case_id)
+            cur.execute(
+                """
+                INSERT INTO case_quality(case_id,checklist_json,updated_by,updated_at)
+                VALUES(%s,%s::jsonb,%s,%s)
+                ON CONFLICT(case_id) DO UPDATE SET
+                  checklist_json=EXCLUDED.checklist_json,
+                  updated_by=EXCLUDED.updated_by,
+                  updated_at=EXCLUDED.updated_at
+                """,
+                (case_id, payload, clean_actor, now),
+            )
+            cur.execute(
+                """
+                INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
+                VALUES(%s,%s,%s,%s,%s)
+                """,
+                (
+                    case_id,
+                    clean_actor,
+                    "quality-checklist-updated",
+                    ", ".join(
+                        f"{key}={'yes' if value else 'no'}"
+                        for key, value in sorted(normalized.items())
+                    )[:500],
+                    now,
+                ),
+            )
+        conn.commit()
+    return {
+        "checklist": normalized,
+        "updated_by": clean_actor,
+        "updated_at": now.isoformat(),
+    }
+
+
+def get_case_quality_pg(dsn: str, case_id: str) -> dict:
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            _require_case(cur, case_id)
+            cur.execute(
+                """
+                SELECT checklist_json,updated_by,updated_at
+                FROM case_quality
+                WHERE case_id=%s
+                """,
+                (case_id,),
+            )
+            row = cur.fetchone()
+    if row is None:
+        return {"checklist": {}, "updated_by": None, "updated_at": None}
+    raw = row["checklist_json"]
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    return {
+        "checklist": normalize_checklist(dict(raw)),
+        "updated_by": row["updated_by"],
+        "updated_at": _iso(row["updated_at"]),
+    }
+
+
 def case_detail_pg(dsn: str, case_id: str) -> dict:
     with _connect(dsn) as conn:
         with conn.cursor() as cur:
@@ -305,15 +383,20 @@ def command_center_snapshot_pg(
     priority: str | None = None,
     state: str | None = None,
     owner: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> dict:
     all_cases = list_cases_pg(dsn)
-    cases = list_cases_pg(
+    filtered_cases = list_cases_pg(
         dsn,
         query=query,
         priority=priority,
         state=state,
         owner=owner,
     )
+    safe_limit = max(1, min(int(limit), 200))
+    safe_offset = max(0, int(offset))
+    cases = filtered_cases[safe_offset:safe_offset + safe_limit]
     active_all = [
         case
         for case in all_cases
