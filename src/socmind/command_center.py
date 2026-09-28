@@ -163,6 +163,7 @@ def transition_case(db_path: str | Path, case_id: str, target: str, *, actor: st
     if len(actor) > 120:
         raise ValueError("Actor must be 120 characters or fewer")
     with connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         row = _require_case(conn, case_id)
         current = row["state"]
         if target not in ALLOWED.get(current, set()):
