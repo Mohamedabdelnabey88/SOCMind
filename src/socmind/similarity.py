@@ -273,8 +273,8 @@ def _similarity_payload(matches: list[SimilarCase]) -> dict:
         },
         "interpretation": (
             "Similarity is normalized evidence/behavior overlap across comparable "
-            "dimensions. Confidence describes evidence breadth, not attacker "
-            "attribution or probability of common origin."
+            "dimensions. It is not attribution. Confidence describes evidence "
+            "breadth, not probability of a common attacker, campaign, or origin."
         ),
     }
 
