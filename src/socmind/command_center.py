@@ -60,8 +60,12 @@ CREATE INDEX IF NOT EXISTS idx_audit_case ON case_audit(case_id,timestamp);
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=10.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.executescript(SCHEMA)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
     for name, sql_type in {
@@ -135,6 +139,11 @@ def assign_case(db_path: str | Path, case_id: str, owner: str, *, actor: str = "
     owner = owner.strip()
     if not owner:
         raise ValueError("Owner cannot be empty")
+    if len(owner) > 120:
+        raise ValueError("Owner must be 120 characters or fewer")
+    actor = actor.strip() or "analyst"
+    if len(actor) > 120:
+        raise ValueError("Actor must be 120 characters or fewer")
     with connect(db_path) as conn:
         _require_case(conn, case_id)
         conn.execute(
@@ -150,6 +159,9 @@ def assign_case(db_path: str | Path, case_id: str, owner: str, *, actor: str = "
 
 def transition_case(db_path: str | Path, case_id: str, target: str, *, actor: str = "analyst") -> None:
     now = datetime.now(timezone.utc).isoformat()
+    actor = actor.strip() or "analyst"
+    if len(actor) > 120:
+        raise ValueError("Actor must be 120 characters or fewer")
     with connect(db_path) as conn:
         row = _require_case(conn, case_id)
         current = row["state"]
@@ -178,15 +190,22 @@ def add_case_note(
     clean = text.strip()
     if not clean:
         raise ValueError("Note text cannot be empty")
+    if len(clean) > 5000:
+        raise ValueError("Note text must be 5000 characters or fewer")
+    author = author.strip() or "analyst"
+    if len(author) > 120:
+        raise ValueError("Author must be 120 characters or fewer")
+    if disposition is not None and len(str(disposition)) > 80:
+        raise ValueError("Disposition must be 80 characters or fewer")
     with connect(db_path) as conn:
         _require_case(conn, case_id)
         cur = conn.execute(
             "INSERT INTO case_notes(case_id,author,text,disposition,created_at) VALUES(?,?,?,?,?)",
-            (case_id, author.strip() or "analyst", clean, disposition, now),
+            (case_id, author, clean, disposition, now),
         )
         conn.execute(
             "INSERT INTO case_audit(case_id,actor,action,detail,timestamp) VALUES(?,?,?,?,?)",
-            (case_id, author.strip() or "analyst", "note-added", clean[:200], now),
+            (case_id, author, "note-added", clean[:200], now),
         )
         conn.commit()
         return int(cur.lastrowid)

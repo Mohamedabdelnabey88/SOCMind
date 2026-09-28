@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+from .benchmark import run_benchmark
 from .adapters import (
     parse_auditd,
     parse_auth_log,
@@ -34,6 +35,7 @@ from .escalation import export_escalation_package
 from .graph import render_mermaid
 from .helptext import render_help
 from .handoff import render_shift_handoff
+from .hardening import security_payload, security_report, validate_web_binding
 from .hypothesis import generate_hypotheses
 from .integrations import ElasticClient, WazuhClient, integration_check
 from .io import load_jsonl
@@ -82,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="SOCMind 1.1.0")
+    parser.add_argument("--version", action="version", version="SOCMind 1.2.0")
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show task-oriented SOCMind help")
@@ -179,7 +181,8 @@ def build_parser() -> argparse.ArgumentParser:
     web_cmd.add_argument("--command-db", help="Optional SQLite SOC command-center database")
     web_cmd.add_argument("--rules", default="detections")
     web_cmd.add_argument("--dispositions")
-    web_cmd.add_argument("--api-token", help="Optional token required by web API mutations/reads")
+    web_cmd.add_argument("--api-token", help="Optional API token; prefer SOCMIND_API_TOKEN environment variable")
+    web_cmd.add_argument("--allow-unsafe-remote", action="store_true", help="Explicitly allow non-loopback bind without token (isolated lab only)")
 
     case_init = sub.add_parser("case-init", help="Create an operational SOC case record")
     case_init.add_argument("output")
@@ -305,6 +308,15 @@ def build_parser() -> argparse.ArgumentParser:
     opencti_check = sub.add_parser("opencti-check", help="Validate OpenCTI GraphQL connectivity")
     opencti_check.add_argument("url")
     opencti_check.add_argument("--insecure", action="store_true")
+
+    security_cmd = sub.add_parser("security-check", help="Evaluate local runtime security posture")
+    security_cmd.add_argument("--host", default="127.0.0.1")
+    security_cmd.add_argument("--command-db")
+    security_cmd.add_argument("--json", action="store_true")
+
+    benchmark_cmd = sub.add_parser("benchmark", help="Run a repeatable local investigation benchmark")
+    benchmark_cmd.add_argument("--events", type=int, default=5000)
+    benchmark_cmd.add_argument("--json", action="store_true")
 
     return parser
 
@@ -730,13 +742,59 @@ def main() -> None:
         print(f"OK | opencti | graphql={data.get('__typename', 'reachable')}")
         return
 
+    if args.command == "security-check":
+        token = os.environ.get("SOCMIND_API_TOKEN")
+        checks = security_report(host=args.host, api_token=token, command_db=args.command_db)
+        if args.json:
+            print(json.dumps(security_payload(host=args.host, api_token=token, command_db=args.command_db), indent=2))
+        else:
+            print("SOCMind Security Check")
+            print("======================")
+            for item in checks:
+                print(f"[{'OK' if item.ok else 'WARN'}] {item.name}: {item.detail}")
+        raise SystemExit(0 if all(item.ok for item in checks) else 1)
+
+    if args.command == "benchmark":
+        result = run_benchmark(args.events)
+        if args.json:
+            print(json.dumps({
+                "events": result.events,
+                "findings": result.findings,
+                "elapsed_seconds": result.elapsed_seconds,
+                "events_per_second": result.events_per_second,
+            }, indent=2))
+        else:
+            print("SOCMind Benchmark")
+            print("=================")
+            print(f"events={result.events}")
+            print(f"findings={result.findings}")
+            print(f"elapsed={result.elapsed_seconds:.6f}s")
+            print(f"throughput={result.events_per_second:.1f} events/s")
+        return
+
     if args.command == "web":
         try:
             import uvicorn
         except ImportError as exc:
             raise RuntimeError("Web dashboard requires: pip install 'socmind[web]'") from exc
         from .webapp import create_app
-        app = create_app(args.events, case_id=args.case_id, command_db=args.command_db, rules_dir=args.rules, dispositions_path=args.dispositions, api_token=args.api_token)
+        api_token = args.api_token or os.environ.get("SOCMIND_API_TOKEN")
+        try:
+            validate_web_binding(
+                args.host,
+                api_token=api_token,
+                allow_unsafe_remote=args.allow_unsafe_remote,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        app = create_app(
+            args.events,
+            case_id=args.case_id,
+            command_db=args.command_db,
+            rules_dir=args.rules,
+            dispositions_path=args.dispositions,
+            api_token=api_token,
+        )
         print(f"SOCMind Web -> http://{args.host}:{args.port}")
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
         return

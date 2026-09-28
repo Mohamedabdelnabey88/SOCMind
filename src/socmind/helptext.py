@@ -98,6 +98,30 @@ Recommended:
 
 Do not use sudo pip install into Kali's system Python.
 """,
+    "security": """SOCMind Security / Hardening
+
+Check runtime posture:
+  socmind security-check
+  SOCMIND_API_TOKEN='strong-local-token' socmind security-check --host 0.0.0.0
+
+Safe web defaults:
+  socmind web examples/attack_chain.jsonl
+
+Remote bind requires authentication:
+  export SOCMIND_API_TOKEN='strong-local-token'
+  socmind web examples/attack_chain.jsonl --host 0.0.0.0
+
+Use --allow-unsafe-remote only in an isolated lab.
+""",
+    "performance": """SOCMind Performance
+
+Run a repeatable local benchmark:
+  socmind benchmark
+  socmind benchmark --events 10000
+  socmind benchmark --events 10000 --json
+
+This benchmark is for comparing the same machine/environment over time; it is not a universal production capacity guarantee.
+""",
     "demo": """SOCMind Portfolio Demo
 
   socmind demo-init -o socmind-demo
@@ -125,6 +149,8 @@ Topics:
   integrations
   detection-engineering
   kali
+  security
+  performance
   demo
 
 Common first commands:
