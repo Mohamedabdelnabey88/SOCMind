@@ -186,6 +186,8 @@ def build_parser() -> argparse.ArgumentParser:
     web_cmd.add_argument("--command-db", help="Optional SQLite SOC command-center database")
     web_cmd.add_argument("--rules", default="detections")
     web_cmd.add_argument("--dispositions")
+    web_cmd.add_argument("--proposed-rules", help="Optional proposed rule pack for IRE what-if comparison")
+    web_cmd.add_argument("--quality-checklist", help="Optional analyst checklist JSON for IRE quality gate")
     web_cmd.add_argument("--api-token", help="Optional API token; prefer SOCMIND_API_TOKEN environment variable")
     web_cmd.add_argument("--allow-unsafe-remote", action="store_true", help="Explicitly allow non-loopback bind without token (isolated lab only)")
 
@@ -881,6 +883,8 @@ def main() -> None:
             rules_dir=args.rules,
             dispositions_path=args.dispositions,
             api_token=api_token,
+            proposed_rules_dir=args.proposed_rules,
+            quality_checklist_path=args.quality_checklist,
         )
         print(f"SOCMind Web -> http://{args.host}:{args.port}")
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
