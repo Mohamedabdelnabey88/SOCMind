@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from socmind.case_workflow import new_case
-from socmind.enterprise_auth import sign_trusted_proxy_identity
+from socmind.enterprise_auth import trusted_proxy_headers
 from socmind.enterprise_command_center import (
     add_case_note_pg,
     assign_case_pg,
