@@ -49,6 +49,11 @@ jobs:
       - run: socmind command-center socmind.db
       - run: socmind lead-health examples/attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl
       - run: socmind shift-brief socmind.db examples/attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl -o ci-shift-brief.md
+      - run: socmind command-register socmind.db operational-case.json --source wazuh --title "Linked evidence case" --events examples/attack_chain.jsonl
+      - run: socmind command-assign socmind.db CI-OPS-001 --owner senior-analyst --actor lead
+      - run: socmind command-note socmind.db CI-OPS-001 --author senior-analyst --text "Reviewed linked evidence" --disposition needs-review
+      - run: socmind command-show socmind.db CI-OPS-001
+      - run: socmind demo-init -o ci-demo
 
   kali:
     runs-on: ubuntu-latest
@@ -91,11 +96,15 @@ jobs:
           .venv/bin/socmind command-center kali-soc.db
           .venv/bin/socmind lead-health examples/linux_attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl
           .venv/bin/socmind shift-brief kali-soc.db examples/linux_attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl -o kali-shift-brief.md
+          .venv/bin/socmind command-register kali-soc.db kali-ops.json --source elastic --title "Linked Kali evidence" --events examples/linux_attack_chain.jsonl
+          .venv/bin/socmind command-note kali-soc.db KALI-OPS-001 --author tier2 --text "Validated linked Linux evidence"
+          .venv/bin/socmind command-show kali-soc.db KALI-OPS-001
+          .venv/bin/socmind demo-init -o kali-demo
       - name: Exercise web dashboard on Kali
         shell: bash
         run: |
-          .venv/bin/socmind web examples/linux_attack_chain.jsonl --case-id CI-KALI-WEB --command-db kali-soc.db --rules detections --dispositions examples/dispositions.jsonl --host 127.0.0.1 --port 8765 > /tmp/socmind-web.log 2>&1 &
+          .venv/bin/socmind web examples/linux_attack_chain.jsonl --case-id CI-KALI-WEB --command-db kali-soc.db --rules detections --dispositions examples/dispositions.jsonl --api-token ci-secret --host 127.0.0.1 --port 8765 > /tmp/socmind-web.log 2>&1 &
           pid=$!
           sleep 3
-          python3 -c "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health')); l=json.load(urllib.request.urlopen('http://127.0.0.1:8765/api/lead-health')); assert h['status']=='ok' and l['summary']['rules']>0"
+          python3 -c "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health')); req=urllib.request.Request('http://127.0.0.1:8765/api/lead-health',headers={'X-SOCMind-Token':'ci-secret'}); l=json.load(urllib.request.urlopen(req)); assert h['status']=='ok' and h['auth_required'] and l['summary']['rules']>0"
           kill $pid
