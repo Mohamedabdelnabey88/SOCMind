@@ -20,6 +20,7 @@ class HypothesisReview:
     confidence: int
     supporting: list[EvidencePoint]
     contradicting: list[EvidencePoint]
+    validation_gaps: list[str]
     unresolved: list[str]
 
 
@@ -96,10 +97,8 @@ def review_hypotheses(events: list[Event]) -> list[HypothesisReview]:
             for statement in hypothesis.supporting
         ]
 
-        contradicting = [
-            EvidencePoint("validation-gap", statement)
-            for statement in hypothesis.contradicting
-        ]
+        validation_gaps = list(hypothesis.contradicting)
+        contradicting: list[EvidencePoint] = []
 
         name = hypothesis.name.lower()
         for point in context:
@@ -143,6 +142,7 @@ def review_hypotheses(events: list[Event]) -> list[HypothesisReview]:
                 confidence=hypothesis.confidence,
                 supporting=supporting,
                 contradicting=contradicting,
+                validation_gaps=validation_gaps,
                 unresolved=unresolved,
             )
         )
@@ -158,6 +158,7 @@ def contradiction_payload(events: list[Event]) -> dict:
                 "confidence": review.confidence,
                 "supporting": [asdict(item) for item in review.supporting],
                 "contradicting": [asdict(item) for item in review.contradicting],
+                "validation_gaps": review.validation_gaps,
                 "unresolved": review.unresolved,
             }
             for review in reviews
@@ -166,6 +167,7 @@ def contradiction_payload(events: list[Event]) -> dict:
             "hypotheses": len(reviews),
             "supporting_points": sum(len(item.supporting) for item in reviews),
             "contradicting_points": sum(len(item.contradicting) for item in reviews),
+            "validation_gaps": sum(len(item.validation_gaps) for item in reviews),
             "unresolved_questions": sum(len(item.unresolved) for item in reviews),
         },
     }
@@ -192,6 +194,8 @@ def render_contradictions(events: list[Event]) -> str:
             f"    - {item['statement']}"
             for item in review["contradicting"]
         ] or ["    - none observed"]
+        lines.append("  Validation gaps:")
+        lines += [f"    ! {item}" for item in review["validation_gaps"]] or ["    - none"]
         lines.append("  Unresolved:")
         lines += [f"    ? {item}" for item in review["unresolved"]] or ["    - none"]
     return "\n".join(lines)
