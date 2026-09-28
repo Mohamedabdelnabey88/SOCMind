@@ -376,6 +376,14 @@ def command_center_snapshot_pg(
             "state": state,
             "owner": owner,
         },
+        "pagination": {
+            "limit": safe_limit,
+            "offset": safe_offset,
+            "matched": len(filtered_cases),
+            "returned": len(cases),
+            "has_more": safe_offset + len(cases) < len(filtered_cases),
+            "has_previous": safe_offset > 0,
+        },
         "sla_breaches": breached,
         "workload": [
             {"owner": key, "active_cases": count}
