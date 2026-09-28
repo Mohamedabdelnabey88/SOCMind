@@ -98,6 +98,25 @@ tune
 lead-health
 ```
 
+## Enterprise operations
+
+```text
+enterprise-info
+trusted-sign
+audit-verify
+backup
+retention
+postgres-schema
+postgres-init
+postgres-health
+```
+
+Workflow help:
+
+```bash
+socmind help enterprise
+```
+
 ## Workspace / demo
 
 ```text
