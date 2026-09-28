@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import secrets
 from pathlib import Path
 
+from .audit_chain import append_record, verify_chain
 from .command_center import (
     acknowledge_case,
     add_case_note,
@@ -11,13 +11,15 @@ from .command_center import (
     command_center_snapshot,
     transition_case,
 )
-from .dashboard import build_dashboard_payload
 from .contradiction import contradiction_payload
+from .dashboard import build_dashboard_payload
 from .detection_replay import detection_replay_payload
 from .detections import load_rules
+from .enterprise_auth import AuthConfig, authenticate
 from .io import load_jsonl
 from .lead_metrics import lead_snapshot
 from .quality_gate import load_checklist, quality_payload
+from .rbac import Principal, require_permission
 from .replay import replay_payload
 from .similarity import similarity_payload
 from .whatif import compare_rule_packs
@@ -33,9 +35,13 @@ def create_app(
     api_token: str | None = None,
     proposed_rules_dir: str | Path | None = None,
     quality_checklist_path: str | Path | None = None,
+    auth_mode: str = "local-token",
+    api_token_role: str = "admin",
+    trusted_proxy_secret: str | None = None,
+    enterprise_audit_path: str | Path | None = None,
 ):
     try:
-        from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
+        from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
         from fastapi.responses import FileResponse
         from fastapi.staticfiles import StaticFiles
     except ImportError as exc:
@@ -50,8 +56,8 @@ def create_app(
 
     assets = Path(__file__).with_name("web")
     app = FastAPI(
-        title="SOCMind Real SOC Workspace",
-        version="1.4.0",
+        title="SOCMind Enterprise SOC Workspace",
+        version="1.5.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
@@ -62,12 +68,20 @@ def create_app(
     app.state.dispositions_path = (
         Path(dispositions_path).resolve() if dispositions_path else None
     )
-    app.state.api_token = api_token
     app.state.proposed_rules_dir = (
         Path(proposed_rules_dir).resolve() if proposed_rules_dir else None
     )
     app.state.quality_checklist_path = (
         Path(quality_checklist_path).resolve() if quality_checklist_path else None
+    )
+    app.state.enterprise_audit_path = (
+        Path(enterprise_audit_path).resolve() if enterprise_audit_path else None
+    )
+    app.state.auth_config = AuthConfig(
+        mode=auth_mode,
+        api_token=api_token,
+        api_token_role=api_token_role,
+        trusted_proxy_secret=trusted_proxy_secret,
     )
 
     @app.middleware("http")
@@ -90,12 +104,21 @@ def create_app(
         )
         return response
 
-    def require_token(x_socmind_token: str | None = Header(default=None)) -> None:
-        expected = app.state.api_token
-        if not expected:
-            return
-        if not x_socmind_token or not secrets.compare_digest(x_socmind_token, expected):
-            raise HTTPException(status_code=401, detail="Invalid SOCMind API token")
+    def principal(request: Request) -> Principal:
+        headers = {key.lower(): value for key, value in request.headers.items()}
+        try:
+            return authenticate(headers, app.state.auth_config)
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    def allowed(permission: str):
+        def dependency(user: Principal = Depends(principal)) -> Principal:
+            try:
+                require_permission(user, permission)
+            except PermissionError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+            return user
+        return dependency
 
     def require_db() -> Path:
         if app.state.command_db is None:
@@ -105,29 +128,58 @@ def create_app(
             )
         return app.state.command_db
 
+    def enterprise_audit(
+        *,
+        case_id: str,
+        user: Principal,
+        action: str,
+        detail: str,
+    ) -> None:
+        if app.state.enterprise_audit_path is None:
+            return
+        append_record(
+            app.state.enterprise_audit_path,
+            case_id=case_id,
+            actor=user.subject,
+            action=action,
+            detail=detail,
+        )
+
     @app.get("/health")
     def health():
         return {
             "status": "ok",
             "case_id": app.state.case_id,
-            "auth_required": bool(app.state.api_token),
+            "auth_mode": app.state.auth_config.mode,
+            "auth_required": bool(app.state.auth_config.api_token)
+            or app.state.auth_config.mode != "local-token",
             "command_center": app.state.command_db is not None,
+            "enterprise_audit": app.state.enterprise_audit_path is not None,
         }
 
-    @app.get("/api/case", dependencies=[Depends(require_token)])
-    def case():
+    @app.get("/api/me")
+    def me(user: Principal = Depends(principal)):
+        return {
+            "subject": user.subject,
+            "role": user.role,
+            "source": user.source,
+        }
+
+    @app.get("/api/case")
+    def case(user: Principal = Depends(allowed("case.read"))):
         try:
             events = load_jsonl(app.state.events_path)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return build_dashboard_payload(events, case_id=app.state.case_id)
 
-    @app.get("/api/command-center", dependencies=[Depends(require_token)])
+    @app.get("/api/command-center")
     def command_center(
         q: str | None = Query(default=None, max_length=120),
         priority: str | None = Query(default=None, max_length=10),
         state: str | None = Query(default=None, max_length=40),
         owner: str | None = Query(default=None, max_length=120),
+        user: Principal = Depends(allowed("case.read")),
     ):
         if app.state.command_db is None:
             return {
@@ -149,8 +201,11 @@ def create_app(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {"enabled": True, **payload}
 
-    @app.get("/api/cases/{target_case_id}", dependencies=[Depends(require_token)])
-    def case_record(target_case_id: str):
+    @app.get("/api/cases/{target_case_id}")
+    def case_record(
+        target_case_id: str,
+        user: Principal = Depends(allowed("case.read")),
+    ):
         db = require_db()
         try:
             detail = case_detail(db, target_case_id)
@@ -169,79 +224,101 @@ def create_app(
                 investigation = {"error": str(exc)}
         return {**detail, "investigation": investigation}
 
-    @app.post(
-        "/api/cases/{target_case_id}/acknowledge",
-        dependencies=[Depends(require_token)],
-    )
-    def acknowledge(target_case_id: str, actor: str = "web-analyst"):
+    @app.post("/api/cases/{target_case_id}/acknowledge")
+    def acknowledge(
+        target_case_id: str,
+        user: Principal = Depends(allowed("case.acknowledge")),
+    ):
         db = require_db()
         try:
-            acknowledge_case(db, target_case_id, actor=actor)
+            acknowledge_case(db, target_case_id, actor=user.subject)
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action="case.acknowledge",
+                detail="Case acknowledged",
+            )
             return case_detail(db, target_case_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @app.post(
-        "/api/cases/{target_case_id}/assign",
-        dependencies=[Depends(require_token)],
-    )
-    def assign_endpoint(target_case_id: str, request: dict = Body(...)):
+    @app.post("/api/cases/{target_case_id}/assign")
+    def assign_endpoint(
+        target_case_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(allowed("case.assign")),
+    ):
         db = require_db()
         try:
-            assign_case(
-                db,
-                target_case_id,
-                str(request.get("owner", "")).strip(),
-                actor=str(request.get("actor", "web-analyst")),
+            owner = str(request.get("owner", "")).strip()
+            assign_case(db, target_case_id, owner, actor=user.subject)
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action="case.assign",
+                detail=f"Assigned to {owner}",
             )
             return case_detail(db, target_case_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.post(
-        "/api/cases/{target_case_id}/transition",
-        dependencies=[Depends(require_token)],
-    )
-    def transition_endpoint(target_case_id: str, request: dict = Body(...)):
+    @app.post("/api/cases/{target_case_id}/transition")
+    def transition_endpoint(
+        target_case_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(allowed("case.transition")),
+    ):
         db = require_db()
         try:
-            transition_case(
-                db,
-                target_case_id,
-                str(request.get("state", "")).strip(),
-                actor=str(request.get("actor", "web-analyst")),
+            target = str(request.get("state", "")).strip()
+            transition_case(db, target_case_id, target, actor=user.subject)
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action="case.transition",
+                detail=f"Transitioned to {target}",
             )
             return case_detail(db, target_case_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.post(
-        "/api/cases/{target_case_id}/notes",
-        dependencies=[Depends(require_token)],
-    )
-    def note_endpoint(target_case_id: str, request: dict = Body(...)):
+    @app.post("/api/cases/{target_case_id}/notes")
+    def note_endpoint(
+        target_case_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(allowed("case.note")),
+    ):
         db = require_db()
         try:
+            text = str(request.get("text", ""))
             note_id = add_case_note(
                 db,
                 target_case_id,
-                author=str(request.get("author", "web-analyst")),
-                text=str(request.get("text", "")),
+                author=user.subject,
+                text=text,
                 disposition=request.get("disposition"),
+            )
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action="case.note",
+                detail=text[:200],
             )
             return {"note_id": note_id, **case_detail(db, target_case_id)}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/api/ire/replay", dependencies=[Depends(require_token)])
-    def ire_replay():
+    @app.get("/api/ire/replay")
+    def ire_replay(user: Principal = Depends(allowed("reasoning.read"))):
         try:
             return replay_payload(load_jsonl(app.state.events_path))
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    @app.get("/api/ire/detection-replay", dependencies=[Depends(require_token)])
-    def ire_detection_replay():
+    @app.get("/api/ire/detection-replay")
+    def ire_detection_replay(
+        user: Principal = Depends(allowed("reasoning.read")),
+    ):
         try:
             events = load_jsonl(app.state.events_path)
             rules = load_rules(app.state.rules_dir)
@@ -249,8 +326,8 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    @app.get("/api/ire/what-if", dependencies=[Depends(require_token)])
-    def ire_what_if():
+    @app.get("/api/ire/what-if")
+    def ire_what_if(user: Principal = Depends(allowed("detection.review"))):
         if app.state.proposed_rules_dir is None:
             return {"enabled": False}
         try:
@@ -270,8 +347,8 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    @app.get("/api/ire/quality", dependencies=[Depends(require_token)])
-    def ire_quality():
+    @app.get("/api/ire/quality")
+    def ire_quality(user: Principal = Depends(allowed("reasoning.read"))):
         try:
             checklist = load_checklist(app.state.quality_checklist_path)
             return quality_payload(
@@ -281,15 +358,20 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    @app.get("/api/reasoning/contradictions", dependencies=[Depends(require_token)])
-    def reasoning_contradictions():
+    @app.get("/api/reasoning/contradictions")
+    def reasoning_contradictions(
+        user: Principal = Depends(allowed("reasoning.read")),
+    ):
         try:
             return contradiction_payload(load_jsonl(app.state.events_path))
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    @app.get("/api/reasoning/similar", dependencies=[Depends(require_token)])
-    def reasoning_similar(limit: int = Query(default=5, ge=1, le=20)):
+    @app.get("/api/reasoning/similar")
+    def reasoning_similar(
+        limit: int = Query(default=5, ge=1, le=20),
+        user: Principal = Depends(allowed("reasoning.read")),
+    ):
         if app.state.command_db is None:
             return {
                 "enabled": False,
@@ -311,8 +393,8 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    @app.get("/api/lead-health", dependencies=[Depends(require_token)])
-    def lead_health():
+    @app.get("/api/lead-health")
+    def lead_health(user: Principal = Depends(allowed("lead.read"))):
         try:
             return lead_snapshot(
                 app.state.events_path,
@@ -321,6 +403,18 @@ def create_app(
             )
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/enterprise/audit/verify")
+    def audit_verify(user: Principal = Depends(allowed("audit.read"))):
+        if app.state.enterprise_audit_path is None:
+            return {"enabled": False, "valid": True, "records": 0}
+        valid, records, error = verify_chain(app.state.enterprise_audit_path)
+        return {
+            "enabled": True,
+            "valid": valid,
+            "records": records,
+            "error": error,
+        }
 
     @app.get("/")
     def index():
