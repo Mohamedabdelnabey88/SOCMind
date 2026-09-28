@@ -14,12 +14,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12"]
-    runs-on: \${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: \${{ matrix.python-version }}
+          python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[sigma,web]" pytest httpx
       - run: python -m compileall -q src
@@ -44,6 +44,9 @@ jobs:
       - run: socmind handoff examples/attack_chain.jsonl --case-id CI-OPS-001 -o shift-handoff.md
       - run: socmind audit analyst-audit.jsonl --case-id CI-OPS-001 --actor tier2 --action investigated --detail "Validated authentication and process evidence"
       - run: socmind investigate examples/attack_chain.jsonl -o investigation-workspace --case-id CI-WORKSPACE-001 --priority P1 --owner tier2
+      - run: socmind command-register socmind.db operational-case.json --source wazuh --title "CI authentication case"
+      - run: socmind command-ack socmind.db CI-OPS-001
+      - run: socmind command-center socmind.db
 
   kali:
     runs-on: ubuntu-latest
@@ -81,10 +84,13 @@ jobs:
           .venv/bin/socmind handoff examples/linux_attack_chain.jsonl --case-id KALI-OPS-001 -o kali-handoff.md
           .venv/bin/socmind audit kali-audit.jsonl --case-id KALI-OPS-001 --actor tier2 --action investigated --detail "Reviewed Linux evidence"
           .venv/bin/socmind investigate examples/linux_attack_chain.jsonl -o kali-workspace --case-id KALI-WORKSPACE-001 --priority P1 --owner tier2
+          .venv/bin/socmind command-register kali-soc.db kali-ops.json --source elastic --title "Kali Linux investigation"
+          .venv/bin/socmind command-ack kali-soc.db KALI-OPS-001
+          .venv/bin/socmind command-center kali-soc.db
       - name: Exercise web dashboard on Kali
         shell: bash
         run: |
-          .venv/bin/socmind web examples/linux_attack_chain.jsonl --case-id CI-KALI-WEB --host 127.0.0.1 --port 8765 > /tmp/socmind-web.log 2>&1 &
+          .venv/bin/socmind web examples/linux_attack_chain.jsonl --case-id CI-KALI-WEB --command-db kali-soc.db --host 127.0.0.1 --port 8765 > /tmp/socmind-web.log 2>&1 &
           pid=$!
           sleep 3
           python3 -c "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health')); assert d['status']=='ok'"
