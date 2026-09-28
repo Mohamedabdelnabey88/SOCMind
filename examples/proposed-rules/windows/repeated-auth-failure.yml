@@ -1,0 +1,17 @@
+title: Proposed Windows Repeated Authentication Failure Signal
+id: socmind-proposed-win-auth-failure
+status: experimental
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: "4625"
+  condition: selection
+tags:
+  - attack.t1110
+falsepositives:
+  - Mistyped passwords
+  - Password synchronization issues
+  - Misconfigured services
+level: low
