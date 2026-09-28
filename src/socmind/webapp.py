@@ -49,7 +49,7 @@ def create_app(
     assets = Path(__file__).with_name("web")
     app = FastAPI(
         title="SOCMind Real SOC Workspace",
-        version="1.2.0",
+        version="1.3.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
