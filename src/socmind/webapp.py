@@ -315,7 +315,7 @@ def create_app(
                 action="case.assign",
                 detail=f"Assigned to {owner}",
             )
-            return case_detail(db, target_case_id)
+            return store_detail(target_case_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -334,7 +334,7 @@ def create_app(
                 action="case.transition",
                 detail=f"Transitioned to {target}",
             )
-            return case_detail(db, target_case_id)
+            return store_detail(target_case_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
