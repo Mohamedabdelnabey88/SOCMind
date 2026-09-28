@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -105,7 +105,7 @@ def append_record(
         entry_hash,
     )
     with target.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record.__dict__, ensure_ascii=False) + "\n")
+        fh.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
     return record
 
 
