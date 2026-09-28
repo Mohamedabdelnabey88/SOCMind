@@ -1,4 +1,4 @@
-let payload=null,commandPayload=null,leadPayload=null,currentCaseId=null;
+let payload=null,commandPayload=null,leadPayload=null,currentCaseId=null,queueOffset=0;\nconst queueLimit=25;
 const q=s=>document.querySelector(s);
 const qa=s=>[...document.querySelectorAll(s)];
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -20,7 +20,7 @@ q("#setToken").addEventListener("click",()=>{
   load();loadCommandCenter();loadLeadHealth();loadIRE();
 });
 q("#refresh").addEventListener("click",()=>{load();loadCommandCenter();loadLeadHealth();loadIRE();});
-q("#applyFilters").addEventListener("click",loadCommandCenter);
+q("#applyFilters").addEventListener("click",()=>{queueOffset=0;loadCommandCenter();});\nq("#queuePrev").addEventListener("click",()=>{queueOffset=Math.max(0,queueOffset-queueLimit);loadCommandCenter();});\nq("#queueNext").addEventListener("click",()=>{if(commandPayload?.pagination?.has_more){queueOffset+=queueLimit;loadCommandCenter();}});
 q("#closeDetail").addEventListener("click",()=>q("#caseDetailPanel").classList.add("hidden"));
 
 qa(".nav").forEach(btn=>btn.addEventListener("click",()=>{
@@ -61,7 +61,7 @@ async function loadCommandCenter(){
     const params=new URLSearchParams();
     if(q("#caseSearch").value.trim())params.set("q",q("#caseSearch").value.trim());
     if(q("#priorityFilter").value)params.set("priority",q("#priorityFilter").value);
-    if(q("#stateFilter").value)params.set("state",q("#stateFilter").value);
+    if(q("#stateFilter").value)params.set("state",q("#stateFilter").value);\n    params.set("limit",String(queueLimit));\n    params.set("offset",String(queueOffset));
     const res=await apiFetch("/api/command-center?"+params.toString());
     if(!res.ok)throw new Error("HTTP "+res.status);
     commandPayload=await res.json();
@@ -69,11 +69,11 @@ async function loadCommandCenter(){
       q("#commandState").textContent="Database not configured";
       q("#caseQueue").innerHTML='<tr><td colspan="5">Start with --command-db to enable operations.</td></tr>';return;
     }
-    q("#commandState").textContent="Live local queue";
+    q("#commandState").textContent="Live queue · "+esc(commandPayload.pagination?.matched??commandPayload.queue.length)+" matched";
     const s=commandPayload.summary;
     const metrics=[["Active Cases",s.active],["P1 Active",s.p1_active],["SLA Breaches",s.sla_breached],["Unassigned",s.unassigned],["MTTA",s.mtta_minutes==null?"—":s.mtta_minutes+"m"],["MTTR",s.mttr_minutes==null?"—":s.mttr_minutes+"m"]];
     q("#commandCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
-    q("#caseQueue").innerHTML=commandPayload.queue.map(item=>{
+    const page=commandPayload.pagination||{matched:commandPayload.queue.length,offset:0,returned:commandPayload.queue.length,has_more:false,has_previous:false};\n    q("#queuePageInfo").textContent=(page.matched?`${page.offset+1}-${page.offset+page.returned} of ${page.matched}`:"0 cases");\n    q("#queuePrev").disabled=!page.has_previous;\n    q("#queueNext").disabled=!page.has_more;\n    q("#caseQueue").innerHTML=commandPayload.queue.map(item=>{
       let sla="Closed";if(item.sla)sla=item.sla.breached?'<span class="sla-breach">BREACHED</span>':esc(item.sla.remaining_minutes+"m");
       return '<tr class="case-row" data-case="'+esc(item.case_id)+'"><td><strong>'+esc(item.case_id)+'</strong><br><span>'+esc(item.title||"")+'</span></td><td><span class="priority '+esc(item.priority.toLowerCase())+'">'+esc(item.priority)+'</span></td><td>'+esc(item.state)+'</td><td>'+esc(item.owner||"Unassigned")+'</td><td>'+sla+'</td></tr>';
     }).join("")||'<tr><td colspan="5">No matching cases.</td></tr>';
@@ -113,14 +113,16 @@ q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim
 
 async function loadLeadHealth(){
   try{
-    const res=await apiFetch("/api/lead-health");if(!res.ok)throw new Error();
-    leadPayload=await res.json();q("#leadState").textContent="Detection telemetry ready";const s=leadPayload.summary;
-    const metrics=[["Rules",s.rules],["Coverage",s.coverage_percent==null?"—":s.coverage_percent+"%"],["Noisy Rules",s.noisy_rules],["Dispositions",s.dispositions],["Findings",s.findings]];
+    const [leadRes,auditRes]=await Promise.all([apiFetch("/api/lead-health"),apiFetch("/api/detections/audit")]);
+    if(!leadRes.ok||!auditRes.ok)throw new Error();
+    leadPayload=await leadRes.json();const audit=await auditRes.json();q("#leadState").textContent="Detection telemetry ready";const s=leadPayload.summary;
+    const metrics=[["Rules",s.rules],["Coverage",s.coverage_percent==null?"—":s.coverage_percent+"%"],["Noisy Rules",s.noisy_rules],["Dispositions",s.dispositions],["Findings",s.findings],["Rule Pack",audit.production_ready?"READY":"REVIEW"]];
     q("#leadCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
     q("#detectionHealth").innerHTML=leadPayload.detection_health.map(item=>{const fp=item.false_positive_rate==null?"—":Math.round(item.false_positive_rate*100)+"% FP";const tp=item.true_positive_rate==null?"—":Math.round(item.true_positive_rate*100)+"% TP";return '<div><b>'+esc(item.rule_id)+'</b><span>score '+esc(item.score)+' · '+tp+' · '+fp+(item.noisy?' · NOISY':'')+'</span></div>';}).join("")||"<div>No disposition history.</div>";
     q("#attackCoverage").innerHTML=leadPayload.coverage.filter(x=>x.observed).map(item=>'<div><b>'+esc(item.technique)+'</b><span>'+(item.covered?'Covered · '+esc(item.rule_count)+' rule(s)':'GAP')+'</span></div>').join("")||"<div>No observed ATT&CK techniques.</div>";
     q("#topUsers").innerHTML=leadPayload.top_users.map(item=>'<div><b>'+esc(item.user)+'</b><span>'+esc(item.events)+' events</span></div>').join("")||"<div>No user telemetry.</div>";
     q("#topHosts").innerHTML=leadPayload.top_hosts.map(item=>'<div><b>'+esc(item.host)+'</b><span>'+esc(item.events)+' events</span></div>').join("")||"<div>No host telemetry.</div>";
+    q("#ruleAudit").innerHTML='<div><b>'+(audit.production_ready?'READY':'REVIEW REQUIRED')+'</b><span>'+esc(audit.rules)+' rules · '+esc(audit.errors)+' errors · '+esc(audit.warnings)+' warnings</span></div>'+audit.issues.map(item=>'<div><b class="'+(item.severity==="error"?"ire-warn":"")+'">'+esc(item.rule_id)+' · '+esc(item.code)+'</b><span>'+esc(item.message)+'</span></div>').join("");
   }catch(err){q("#leadState").textContent="Unavailable";}
 }
 
@@ -147,15 +149,14 @@ async function loadIRE(){
       ["Blind Before Detect",detection.blind_steps_before_first_detection],
       ["Visibility",detection.visibility_percent+"%"],
       ["Detection Gaps",detection.gap_techniques.length],
-      ["Quality",quality.percentage+"%"],
+      ["Quality",quality.readiness+" · "+quality.percentage+"%"],
       ["Similar Cases",similar.summary?similar.summary.matches:0]
     ];
     q("#ireCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
 
     q("#ireDetection").innerHTML=
-      '<div><b>Observed techniques</b><span>'+esc(detection.observed_techniques.join(", ")||"—")+'</span></div>'+
-      '<div><b>Covered techniques</b><span>'+esc(detection.covered_techniques.join(", ")||"—")+'</span></div>'+
-      '<div><b>Detection gaps</b><span class="'+(detection.gap_techniques.length?"ire-warn":"")+'">'+esc(detection.gap_techniques.join(", ")||"None")+'</span></div>';
+      '<div><b>Time to first meaningful detection</b><span>'+esc(detection.time_to_first_detection_seconds==null?"—":detection.time_to_first_detection_seconds+"s")+'</span></div>'+
+      detection.technique_visibility.map(item=>'<div><b class="'+(item.state==="gap"?"ire-warn":item.state==="detected"?"ire-good":"")+'">'+esc(item.technique)+' · '+esc(item.state)+'</b><span>first observed step '+esc(item.first_observed_step)+' · first detected '+esc(item.first_detected_step??"—")+' · blind '+esc(item.blind_seconds_until_detection??"—")+'s · rules '+esc(item.matching_rule_ids.join(", ")||"—")+'</span></div>').join("");
 
     const whatIfRes=await apiFetch("/api/ire/what-if");
     if(whatIfRes.status===403){
@@ -176,8 +177,8 @@ async function loadIRE(){
       q("#ireWhatIf").innerHTML='<div>What-If comparison unavailable.</div>';
     }
 
-    q("#ireQuality").innerHTML=quality.items.map(item=>
-      '<div><b class="'+(item.complete?"ire-good":"ire-warn")+'">'+(item.complete?"✓ ":"○ ")+esc(item.label)+'</b><span>'+esc(item.evidence)+'</span></div>'
+    q("#ireQuality").innerHTML='<div><b class="'+(quality.closure_allowed?"ire-good":"ire-warn")+'">'+esc(quality.readiness)+'</b><span>Closure allowed: '+esc(quality.closure_allowed)+'</span></div>'+quality.items.map(item=>
+      '<div><b class="'+(item.status==="PASS"?"ire-good":"ire-warn")+'">['+esc(item.status)+'] '+esc(item.label)+'</b><span>'+esc(item.severity)+' · '+esc(item.evidence)+'</span></div>'
     ).join("");
 
     q("#ireReplay").innerHTML=replay.steps.map(step=>{
