@@ -4,7 +4,7 @@ SOCMind is a defensive Blue Team project and may process sensitive security tele
 
 ## Supported release
 
-The current supported release line is **1.5.x**.
+The current supported release line is **1.6.x**.
 
 ## Reporting a vulnerability
 
