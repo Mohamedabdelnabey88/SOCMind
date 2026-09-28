@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import shutil
+import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,7 +21,9 @@ def backup_sqlite(database: str | Path, output: str | Path) -> Path:
         raise FileNotFoundError(source)
     target = Path(output)
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
+    with sqlite3.connect(str(source)) as source_conn:
+        with sqlite3.connect(str(target)) as target_conn:
+            source_conn.backup(target_conn)
     return target
 
 
