@@ -78,13 +78,29 @@ def compare_fingerprints(
     left: CaseFingerprint,
     right: CaseFingerprint,
 ) -> tuple[float, dict[str, float]]:
-    parts = {
-        "techniques": _jaccard(left.techniques, right.techniques),
-        "event_ids": _jaccard(left.event_ids, right.event_ids),
-        "processes": _jaccard(left.processes, right.processes),
-        "iocs": _jaccard(left.iocs, right.iocs),
+    dimensions = {
+        "techniques": (left.techniques, right.techniques),
+        "event_ids": (left.event_ids, right.event_ids),
+        "processes": (left.processes, right.processes),
+        "iocs": (left.iocs, right.iocs),
     }
-    score = sum(parts[key] * WEIGHTS[key] for key in parts) * 100
+    parts = {
+        key: _jaccard(left_values, right_values)
+        for key, (left_values, right_values) in dimensions.items()
+    }
+    available = [
+        key
+        for key, (left_values, right_values) in dimensions.items()
+        if left_values or right_values
+    ]
+    available_weight = sum(WEIGHTS[key] for key in available)
+    score = (
+        sum(parts[key] * WEIGHTS[key] for key in available)
+        / available_weight
+        * 100
+        if available_weight
+        else 0.0
+    )
     return round(score, 1), {
         key: round(value * 100, 1)
         for key, value in parts.items()
