@@ -503,6 +503,17 @@ def create_app(
             return {"enabled": False}
         try:
             events = load_jsonl(app.state.events_path)
+            current_audit = rule_audit_payload(app.state.rules_dir)
+            proposed_audit = rule_audit_payload(app.state.proposed_rules_dir)
+            if not current_audit["production_ready"] or not proposed_audit["production_ready"]:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "message": "Detection What-If requires rule packs with no audit errors.",
+                        "current": current_audit,
+                        "proposed": proposed_audit,
+                    },
+                )
             current = load_rules(app.state.rules_dir)
             proposed = load_rules(app.state.proposed_rules_dir)
             result = compare_rule_packs(events, current, proposed)
@@ -514,6 +525,10 @@ def create_app(
                 "visibility_delta": result.visibility_delta,
                 "blind_step_delta": result.blind_step_delta,
                 "newly_covered_techniques": result.newly_covered_techniques,
+                "rule_pack_audit": {
+                    "current": current_audit,
+                    "proposed": proposed_audit,
+                },
             }
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
