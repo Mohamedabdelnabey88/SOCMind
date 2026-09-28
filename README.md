@@ -1,5 +1,7 @@
 # SOCMind
 
+![CI](https://github.com/Mohamedabdelnabey88/SOCMind/actions/workflows/ci.yml/badge.svg)
+
 **SOCMind** is an open-source, cross-platform SOC Tier 1 / Tier 2 investigation and detection-engineering workbench for **Windows, Linux, and Kali Linux**.
 
 It connects the SOC lifecycle end to end:
@@ -22,7 +24,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v1.1 — Live Integrations & Guided CLI**
+> **v1.2 — Hardened Portfolio Release**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -73,6 +75,47 @@ socmind analyze examples/linux_attack_chain.jsonl \
 ```
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
+
+## v1.2 Hardening & Release Quality
+
+The final planned portfolio stage adds operational hardening and release validation:
+
+- remote web binds are refused without API protection by default
+- `SOCMIND_API_TOKEN` is the preferred way to provide the local API token
+- CSP, anti-framing, no-sniff, no-referrer and no-store web headers
+- SQLite WAL mode, busy timeout and concurrency-friendly settings
+- bounded analyst input fields
+- `socmind security-check`
+- deterministic `socmind benchmark`
+- wheel/package installation validation in CI
+- SECURITY, CONTRIBUTING and CHANGELOG documents
+
+Security posture:
+
+```bash
+socmind security-check
+socmind help security
+```
+
+Performance comparison:
+
+```bash
+socmind benchmark --events 5000
+socmind benchmark --events 10000 --json
+socmind help performance
+```
+
+For remote binding, prefer an environment variable so the token is not exposed in the process command line:
+
+```bash
+export SOCMIND_API_TOKEN='replace-with-a-strong-token'
+
+socmind web examples/attack_chain.jsonl \
+  --command-db socmind-demo/socmind-demo.db \
+  --host 0.0.0.0
+```
+
+Detailed release guide: [SOCMind 1.2 Hardened Portfolio Release](docs/release-v1.2.md)
 
 ## v1.1 Live Integrations & Guided CLI
 
@@ -525,6 +568,8 @@ socmind analyze normalized.jsonl \
 - [SOC Lead & Detection Health](docs/soc-lead-detection-health.md)
 - [v1.0 Real SOC Workspace](docs/v1-real-soc-workspace.md)
 - [Live Integrations & CLI Help](docs/live-integrations.md)
+- [CLI Reference](docs/cli-reference.md)
+- [1.2 Hardened Portfolio Release](docs/release-v1.2.md)
 
 ## CI quality gate
 
@@ -548,25 +593,17 @@ Every pull request validates:
 
 ## Roadmap
 
-### v0.7 — Detection maturity
-- richer Sigma condition support
-- larger Windows/Linux rule packs
-- detection metadata quality checks
-- coverage dashboard artifacts
-- regression corpus
+The initial portfolio roadmap is complete through **v1.2**.
 
-### v0.8 — Integrations
-- MISP / OpenCTI provider interface
-- Wazuh API integration
-- Elastic query/export helpers
-- ticketing adapters
-- analyst workflow state
+Future work is optional expansion rather than a prerequisite for the portfolio release:
 
-### Post-1.0 roadmap
-- live Wazuh / Elastic API connectors
-- MISP / OpenCTI integrations
-- ticketing / SOAR connectors
-- organization-specific RBAC and identity integration
+- organization-specific SSO / RBAC
+- ticketing and SOAR connectors
+- richer MISP/OpenCTI enrichment profiles
+- larger detection packs and regression corpus
+- deployment patterns for team/multi-user environments
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Safety
 
