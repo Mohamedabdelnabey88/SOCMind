@@ -52,6 +52,11 @@
               <button id="applyFilters">Apply</button>
             </div>
             <div class="table-wrap"><table><thead><tr><th>Case</th><th>Priority</th><th>State</th><th>Owner</th><th>SLA</th></tr></thead><tbody id="caseQueue"></tbody></table></div>
+            <div class="filters queue-pagination">
+              <button id="queuePrev">Previous</button>
+              <span id="queuePageInfo" class="score">0 cases</span>
+              <button id="queueNext">Next</button>
+            </div>
           </article>
           <article class="card">
             <div class="card-head"><h2>Analyst Workload</h2><span>Active assignments</span></div>
@@ -77,7 +82,7 @@
           </div>
           <div class="grid two detail-grid">
             <div><h3>Analyst Notes</h3><div id="caseNotes" class="stack compact"></div>
-              <div class="note-form"><input id="noteAuthor" value="web-analyst" placeholder="Author"><textarea id="noteText" placeholder="Investigation note"></textarea><button id="addNote">Add Note</button></div>
+              <div class="note-form"><textarea id="noteText" placeholder="Investigation note"></textarea><button id="addNote">Add Note</button></div>
             </div>
             <div><h3>Audit Trail</h3><div id="caseAudit" class="stack compact"></div></div>
           </div>
@@ -96,6 +101,10 @@
           <article class="card"><div class="card-head"><h2>Top Users</h2><span>Event concentration</span></div><div id="topUsers" class="stack compact"></div></article>
           <article class="card"><div class="card-head"><h2>Top Hosts</h2><span>Event concentration</span></div><div id="topHosts" class="stack compact"></div></article>
         </div>
+        <article class="card" style="margin-top:16px">
+          <div class="card-head"><h2>Detection Rule Pack Audit</h2><span>Metadata / ATT&CK / IDs / conditions</span></div>
+          <div id="ruleAudit" class="stack compact"></div>
+        </article>
       </section>
 
       <section id="ire" class="panel page">
