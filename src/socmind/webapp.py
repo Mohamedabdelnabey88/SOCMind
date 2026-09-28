@@ -7,6 +7,8 @@ from .command_center import (
     assign_case,
     case_detail,
     command_center_snapshot,
+    get_case_quality,
+    save_case_quality,
     transition_case,
 )
 from .contradiction import contradiction_payload
@@ -20,11 +22,13 @@ from .enterprise_command_center import (
     assign_case_pg,
     case_detail_pg,
     command_center_snapshot_pg,
+    get_case_quality_pg,
+    save_case_quality_pg,
     transition_case_pg,
 )
 from .io import load_jsonl
 from .lead_metrics import lead_snapshot
-from .quality_gate import load_checklist, quality_payload
+from .quality_gate import load_checklist, quality_payload, review_investigation
 from .rbac import Principal, require_permission
 from .replay import replay_payload
 from .rule_audit import rule_audit_payload
@@ -47,6 +51,7 @@ def create_app(
     trusted_proxy_secret: str | None = None,
     enterprise_audit_path: str | Path | None = None,
     postgres_dsn: str | None = None,
+    enforce_quality_on_close: bool = False,
 ):
     try:
         from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
@@ -86,6 +91,7 @@ def create_app(
         Path(enterprise_audit_path).resolve() if enterprise_audit_path else None
     )
     app.state.postgres_dsn = postgres_dsn
+    app.state.enforce_quality_on_close = bool(enforce_quality_on_close)
     app.state.auth_config = AuthConfig(
         mode=auth_mode,
         api_token=api_token,
@@ -187,6 +193,29 @@ def create_app(
             disposition=disposition,
         )
 
+
+    def store_quality_get(case_id: str):
+        kind, target = require_store()
+        if kind == "postgres":
+            return get_case_quality_pg(target, case_id)
+        return get_case_quality(target, case_id)
+
+    def store_quality_save(case_id: str, checklist: dict, actor: str):
+        kind, target = require_store()
+        if kind == "postgres":
+            return save_case_quality_pg(
+                target,
+                case_id,
+                checklist,
+                actor=actor,
+            )
+        return save_case_quality(
+            target,
+            case_id,
+            checklist,
+            actor=actor,
+        )
+
     def enterprise_audit(
         *,
         case_id: str,
@@ -215,6 +244,7 @@ def create_app(
             "command_center": app.state.command_db is not None or bool(app.state.postgres_dsn),
             "case_store": "postgres" if app.state.postgres_dsn else ("sqlite" if app.state.command_db is not None else "none"),
             "enterprise_audit": app.state.enterprise_audit_path is not None,
+            "quality_close_enforced": app.state.enforce_quality_on_close,
         }
 
     @app.get("/api/me")
@@ -284,7 +314,22 @@ def create_app(
                 )
             except Exception as exc:
                 investigation = {"error": str(exc)}
-        return {**detail, "investigation": investigation}
+        quality_record = store_quality_get(target_case_id)
+        quality_review = None
+        if evidence_path and Path(evidence_path).is_file():
+            try:
+                quality_review = quality_payload(
+                    load_jsonl(evidence_path),
+                    checklist=quality_record["checklist"],
+                )
+            except Exception as exc:
+                quality_review = {"error": str(exc)}
+        return {
+            **detail,
+            "investigation": investigation,
+            "quality_checklist": quality_record,
+            "quality_review": quality_review,
+        }
 
     @app.post("/api/cases/{target_case_id}/acknowledge")
     def acknowledge(
@@ -330,6 +375,32 @@ def create_app(
     ):
         try:
             target = str(request.get("state", "")).strip()
+            if target == "resolved" and app.state.enforce_quality_on_close:
+                detail = store_detail(target_case_id)
+                evidence_path = detail["case"].get("evidence_path")
+                if not evidence_path or not Path(evidence_path).is_file():
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "message": "Case closure blocked: linked evidence is required.",
+                            "blockers": ["Linked evidence unavailable"],
+                        },
+                    )
+                quality_record = store_quality_get(target_case_id)
+                review = review_investigation(
+                    load_jsonl(evidence_path),
+                    checklist=quality_record["checklist"],
+                )
+                if not review.closure_allowed:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "message": "Case closure blocked by investigation quality gate.",
+                            "readiness": review.readiness,
+                            "blockers": review.blockers,
+                            "warnings": review.warnings,
+                        },
+                    )
             store_transition(target_case_id, target, user.subject)
             enterprise_audit(
                 case_id=target_case_id,
@@ -362,6 +433,49 @@ def create_app(
                 detail=text[:200],
             )
             return {"note_id": note_id, **store_detail(target_case_id)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/cases/{target_case_id}/quality-checklist")
+    def case_quality_checklist(
+        target_case_id: str,
+        user: Principal = Depends(allowed("case.read")),
+    ):
+        try:
+            return store_quality_get(target_case_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.put("/api/cases/{target_case_id}/quality-checklist")
+    def update_case_quality_checklist(
+        target_case_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(allowed("case.quality")),
+    ):
+        try:
+            raw = request.get("checklist")
+            if not isinstance(raw, dict):
+                raise ValueError("Body must contain a checklist object")
+            record = store_quality_save(
+                target_case_id,
+                raw,
+                user.subject,
+            )
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action="case.quality",
+                detail="Investigation quality checklist updated",
+            )
+            detail = store_detail(target_case_id)
+            evidence_path = detail["case"].get("evidence_path")
+            review = None
+            if evidence_path and Path(evidence_path).is_file():
+                review = quality_payload(
+                    load_jsonl(evidence_path),
+                    checklist=record["checklist"],
+                )
+            return {**record, "review": review}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
