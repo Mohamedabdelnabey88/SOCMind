@@ -182,8 +182,9 @@ async function loadIRE(){
 
     q("#ireContradictions").innerHTML=contradictions.hypotheses.map(item=>{
       const conflicting=item.contradicting.map(x=>'<div class="ire-warn">- '+esc(x.statement)+'</div>').join("");
+      const gaps=item.validation_gaps.map(x=>'<div>! '+esc(x)+'</div>').join("");
       const unresolved=item.unresolved.map(x=>'<div>? '+esc(x)+'</div>').join("");
-      return '<div><b>'+esc(item.hypothesis)+' · '+esc(item.confidence)+'%</b><span>'+esc(item.supporting.length)+' supporting · '+esc(item.contradicting.length)+' contradicting/context</span>'+conflicting+unresolved+'</div>';
+      return '<div><b>'+esc(item.hypothesis)+' · '+esc(item.confidence)+'%</b><span>'+esc(item.supporting.length)+' supporting · '+esc(item.contradicting.length)+' explicit contradiction/context · '+esc(item.validation_gaps.length)+' validation gap(s)</span>'+conflicting+gaps+unresolved+'</div>';
     }).join("")||"<div>No hypotheses available for contradiction review.</div>";
 
     if(similar.enabled===false){
