@@ -47,6 +47,8 @@ jobs:
       - run: socmind command-register socmind.db operational-case.json --source wazuh --title "CI authentication case"
       - run: socmind command-ack socmind.db CI-OPS-001
       - run: socmind command-center socmind.db
+      - run: socmind lead-health examples/attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl
+      - run: socmind shift-brief socmind.db examples/attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl -o ci-shift-brief.md
 
   kali:
     runs-on: ubuntu-latest
@@ -87,11 +89,13 @@ jobs:
           .venv/bin/socmind command-register kali-soc.db kali-ops.json --source elastic --title "Kali Linux investigation"
           .venv/bin/socmind command-ack kali-soc.db KALI-OPS-001
           .venv/bin/socmind command-center kali-soc.db
+          .venv/bin/socmind lead-health examples/linux_attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl
+          .venv/bin/socmind shift-brief kali-soc.db examples/linux_attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl -o kali-shift-brief.md
       - name: Exercise web dashboard on Kali
         shell: bash
         run: |
-          .venv/bin/socmind web examples/linux_attack_chain.jsonl --case-id CI-KALI-WEB --command-db kali-soc.db --host 127.0.0.1 --port 8765 > /tmp/socmind-web.log 2>&1 &
+          .venv/bin/socmind web examples/linux_attack_chain.jsonl --case-id CI-KALI-WEB --command-db kali-soc.db --rules detections --dispositions examples/dispositions.jsonl --host 127.0.0.1 --port 8765 > /tmp/socmind-web.log 2>&1 &
           pid=$!
           sleep 3
-          python3 -c "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health')); assert d['status']=='ok'"
+          python3 -c "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health')); l=json.load(urllib.request.urlopen('http://127.0.0.1:8765/api/lead-health')); assert h['status']=='ok' and l['summary']['rules']>0"
           kill $pid

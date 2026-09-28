@@ -132,6 +132,11 @@ def command_center_snapshot(db_path: str | Path) -> dict:
         closed = datetime.fromisoformat(case.updated_at.replace("Z", "+00:00"))
         mttr_values.append(max(0, int((closed - opened).total_seconds() // 60)))
 
+    sla_by_case = {
+        c.case_id: evaluate_sla(c.opened_at, priority=c.priority)
+        for c in active
+    }
+
     return {
         "generated_at": now.isoformat(),
         "summary": {
@@ -160,9 +165,9 @@ def command_center_snapshot(db_path: str | Path) -> dict:
                 "opened_at": c.opened_at,
                 "updated_at": c.updated_at,
                 "sla": {
-                    "breached": evaluate_sla(c.opened_at, priority=c.priority).breached,
-                    "remaining_minutes": evaluate_sla(c.opened_at, priority=c.priority).remaining_minutes,
-                } if c.state not in {"resolved", "false-positive"} else None,
+                    "breached": sla_by_case[c.case_id].breached,
+                    "remaining_minutes": sla_by_case[c.case_id].remaining_minutes,
+                } if c.case_id in sla_by_case else None,
             }
             for c in cases
         ],
