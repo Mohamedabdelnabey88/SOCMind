@@ -16,6 +16,27 @@ class DetectionStep:
     techniques: list[str]
     matched_rules: list[str]
     detected: bool
+    blind: bool
+
+
+@dataclass(frozen=True, slots=True)
+class TechniqueVisibility:
+    technique: str
+    first_observed_step: int
+    first_detected_step: int | None
+    detection_delay_steps: int | None
+    observed_steps: int
+    detected_steps: int
+    visibility_percent: float
+    contributing_rules: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class RuleContribution:
+    rule_id: str
+    matched_steps: int
+    first_match_step: int
+    techniques: list[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,12 +44,15 @@ class DetectionReplayResult:
     total_steps: int
     meaningful_steps: int
     detected_steps: int
+    blind_steps: int
     first_detection_step: int | None
     blind_steps_before_first_detection: int
     visibility_percent: float
     observed_techniques: list[str]
     covered_techniques: list[str]
     gap_techniques: list[str]
+    technique_visibility: list[TechniqueVisibility]
+    rule_contributions: list[RuleContribution]
     steps: list[DetectionStep]
 
 
@@ -61,6 +85,7 @@ def replay_detection(events: list[Event], rules: list[DetectionRule]) -> Detecti
             event_techniques.setdefault(_event_key(evidence), set()).update(techniques)
 
     matched_by_event: dict[tuple, list[str]] = {}
+    rule_map = {rule.id: rule for rule in rules}
     for rule in rules:
         for event in evaluate_rule(rule, ordered):
             matched_by_event.setdefault(_event_key(event), []).append(rule.id)
@@ -69,6 +94,8 @@ def replay_detection(events: list[Event], rules: list[DetectionRule]) -> Detecti
     for index, event in enumerate(ordered, 1):
         techniques = sorted(event_techniques.get(_event_key(event), set()))
         matched_rules = sorted(set(matched_by_event.get(_event_key(event), [])))
+        meaningful = bool(techniques)
+        detected = bool(matched_rules)
         steps.append(
             DetectionStep(
                 index=index,
@@ -77,53 +104,110 @@ def replay_detection(events: list[Event], rules: list[DetectionRule]) -> Detecti
                 host=event.host,
                 techniques=techniques,
                 matched_rules=matched_rules,
-                detected=bool(matched_rules),
+                detected=detected,
+                blind=meaningful and not detected,
             )
         )
 
-    meaningful = [step for step in steps if step.techniques]
-    detected_meaningful = [step for step in meaningful if step.detected]
-    first_detection = next((step.index for step in steps if step.detected), None)
-    blind_before = 0
+    meaningful_steps = [step for step in steps if step.techniques]
+    detected_meaningful = [step for step in meaningful_steps if step.detected]
+    blind_meaningful = [step for step in meaningful_steps if step.blind]
+    first_detection = next((step.index for step in meaningful_steps if step.detected), None)
+
     if first_detection is not None:
         blind_before = sum(
-            1 for step in meaningful
-            if step.index < first_detection and not step.detected
+            1
+            for step in meaningful_steps
+            if step.index < first_detection and step.blind
         )
     else:
-        blind_before = len(meaningful)
+        blind_before = len(meaningful_steps)
 
     observed = sorted({
-        technique for step in meaningful for technique in step.techniques
+        technique
+        for step in meaningful_steps
+        for technique in step.techniques
     })
     rule_techniques = {
-        technique for rule in rules for technique in rule.attack_techniques
+        technique
+        for rule in rules
+        for technique in rule.attack_techniques
     }
     covered = sorted(set(observed) & rule_techniques)
     gaps = sorted(set(observed) - rule_techniques)
+
     visibility = (
-        round((len(detected_meaningful) / len(meaningful)) * 100, 1)
-        if meaningful else 0.0
+        round((len(detected_meaningful) / len(meaningful_steps)) * 100, 1)
+        if meaningful_steps
+        else 0.0
     )
+
+    technique_visibility: list[TechniqueVisibility] = []
+    for technique in observed:
+        relevant = [step for step in meaningful_steps if technique in step.techniques]
+        detected_relevant = [step for step in relevant if step.detected]
+        first_observed = relevant[0].index
+        first_detected = detected_relevant[0].index if detected_relevant else None
+        contributing = sorted({
+            rule_id
+            for step in detected_relevant
+            for rule_id in step.matched_rules
+            if technique in rule_map.get(rule_id, DetectionRule("", "", "", {}, [], [])).attack_techniques
+        })
+        technique_visibility.append(
+            TechniqueVisibility(
+                technique=technique,
+                first_observed_step=first_observed,
+                first_detected_step=first_detected,
+                detection_delay_steps=(
+                    first_detected - first_observed
+                    if first_detected is not None
+                    else None
+                ),
+                observed_steps=len(relevant),
+                detected_steps=len(detected_relevant),
+                visibility_percent=round(
+                    (len(detected_relevant) / len(relevant)) * 100,
+                    1,
+                ),
+                contributing_rules=contributing,
+            )
+        )
+
+    contributions: list[RuleContribution] = []
+    for rule in rules:
+        matched = [step for step in steps if rule.id in step.matched_rules]
+        if not matched:
+            continue
+        contributions.append(
+            RuleContribution(
+                rule_id=rule.id,
+                matched_steps=len(matched),
+                first_match_step=matched[0].index,
+                techniques=sorted(rule.attack_techniques),
+            )
+        )
+    contributions.sort(key=lambda item: (item.first_match_step, item.rule_id))
 
     return DetectionReplayResult(
         total_steps=len(steps),
-        meaningful_steps=len(meaningful),
+        meaningful_steps=len(meaningful_steps),
         detected_steps=len(detected_meaningful),
+        blind_steps=len(blind_meaningful),
         first_detection_step=first_detection,
         blind_steps_before_first_detection=blind_before,
         visibility_percent=visibility,
         observed_techniques=observed,
         covered_techniques=covered,
         gap_techniques=gaps,
+        technique_visibility=technique_visibility,
+        rule_contributions=contributions,
         steps=steps,
     )
 
 
 def detection_replay_payload(events: list[Event], rules: list[DetectionRule]) -> dict:
-    result = replay_detection(events, rules)
-    payload = asdict(result)
-    return payload
+    return asdict(replay_detection(events, rules))
 
 
 def render_detection_replay(events: list[Event], rules: list[DetectionRule]) -> str:
@@ -134,6 +218,7 @@ def render_detection_replay(events: list[Event], rules: list[DetectionRule]) -> 
         f"steps={result.total_steps}",
         f"meaningful_steps={result.meaningful_steps}",
         f"detected_steps={result.detected_steps}",
+        f"blind_steps={result.blind_steps}",
         f"first_detection_step={result.first_detection_step or '-'}",
         f"blind_steps_before_first_detection={result.blind_steps_before_first_detection}",
         f"visibility={result.visibility_percent}%",
@@ -149,10 +234,26 @@ def render_detection_replay(events: list[Event], rules: list[DetectionRule]) -> 
             f"- step {step.index}: {step.event_id} | {state} | "
             f"techniques={','.join(step.techniques)} | rules={rules_text}"
         )
-    lines.append("")
-    lines.append("Coverage:")
-    for technique in result.observed_techniques:
+
+    lines += ["", "Per-technique visibility:"]
+    for item in result.technique_visibility:
+        detected = item.first_detected_step if item.first_detected_step is not None else "-"
+        delay = item.detection_delay_steps if item.detection_delay_steps is not None else "-"
         lines.append(
-            f"- {technique}: {'COVERED' if technique in result.covered_techniques else 'GAP'}"
+            f"- {item.technique}: first_observed={item.first_observed_step} "
+            f"first_detected={detected} delay={delay} "
+            f"visibility={item.visibility_percent}%"
         )
+
+    lines += ["", "Rule contribution:"]
+    if result.rule_contributions:
+        for item in result.rule_contributions:
+            lines.append(
+                f"- {item.rule_id}: first_match={item.first_match_step} "
+                f"matched_steps={item.matched_steps} "
+                f"techniques={','.join(item.techniques) or '-'}"
+            )
+    else:
+        lines.append("- no rules matched")
+
     return "\n".join(lines)
