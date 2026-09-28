@@ -26,6 +26,16 @@ def test_contradiction_engine_surfaces_explicit_benign_context():
     ]
     assert any("trusted/managed device" in value for value in statements)
     assert payload["summary"]["unresolved_questions"] > 0
+    context = [
+        item
+        for hypothesis in payload["hypotheses"]
+        for item in hypothesis["contradicting"]
+        if "trusted/managed device" in item["statement"]
+    ]
+    assert context
+    assert context[0]["timestamp"]
+    assert context[0]["event_id"]
+    assert context[0]["host"]
 
 
 def test_case_fingerprint_is_deterministic():
@@ -63,6 +73,9 @@ def test_similar_cases_rank_behaviorally_similar_case_first(tmp_path):
     assert matches[0].case_id == "WIN-OLD"
     assert matches[0].score > 70
     assert matches[0].shared_techniques
+    assert matches[0].confidence == "high"
+    assert matches[0].matched_dimensions >= 3
+    assert matches[0].comparable_dimensions >= matches[0].matched_dimensions
 
 
 def test_similarity_does_not_claim_attribution(tmp_path):
