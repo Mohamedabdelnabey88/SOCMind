@@ -83,3 +83,63 @@ def test_similarity_api_supports_minimum_score_threshold(tmp_path):
     assert payload["matches"][0]["score"] == 100.0
     assert payload["matches"][0]["strength"] == "strong"
     assert payload["summary"]["min_score"] == 90.0
+
+
+def test_per_case_quality_gate_can_block_and_release_case_closure(tmp_path):
+    db = tmp_path / "soc.db"
+    evidence = ROOT / "examples/attack_chain.jsonl"
+    upsert_case(
+        db,
+        new_case("QUALITY-001", priority="P1"),
+        title="Quality enforced case",
+        evidence_path=evidence,
+    )
+
+    app = create_app(
+        evidence,
+        case_id="QUALITY-001",
+        command_db=db,
+        rules_dir=ROOT / "detections",
+        enforce_quality_on_close=True,
+    )
+    client = TestClient(app)
+
+    for state in ("triage", "investigating", "contained"):
+        response = client.post(
+            "/api/cases/QUALITY-001/transition",
+            json={"state": state},
+        )
+        assert response.status_code == 200
+
+    blocked = client.post(
+        "/api/cases/QUALITY-001/transition",
+        json={"state": "resolved"},
+    )
+    assert blocked.status_code == 409
+    detail = blocked.json()["detail"]
+    assert detail["readiness"] == "BLOCKED"
+    assert detail["blockers"]
+
+    complete = {
+        "iocs_reviewed": True,
+        "process_ancestry_reviewed": True,
+        "contradictions_reviewed": True,
+        "persistence_validated": True,
+        "scope_validated": True,
+        "detection_feedback": True,
+        "handoff_complete": True,
+    }
+    saved = client.put(
+        "/api/cases/QUALITY-001/quality-checklist",
+        json={"checklist": complete},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["review"]["closure_allowed"] is True
+    assert saved.json()["review"]["readiness"] == "READY"
+
+    closed = client.post(
+        "/api/cases/QUALITY-001/transition",
+        json={"state": "resolved"},
+    )
+    assert closed.status_code == 200
+    assert closed.json()["case"]["state"] == "resolved"
