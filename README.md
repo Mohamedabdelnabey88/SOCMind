@@ -22,7 +22,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v0.7 — Web Investigation Dashboard**
+> **v0.8 — Multi-Case SOC Command Center**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -255,6 +255,39 @@ These workflows demonstrate ownership, escalation discipline, SLA awareness, evi
 
 Detailed guide: [Real SOC Workflow Model](docs/real-soc-workflow.md)
 
+## Multi-Case SOC Command Center
+
+SOCMind now adds the shift-level view expected in a real SOC:
+
+- case queue across multiple investigations
+- P1 visibility
+- SLA breach tracking
+- unassigned-case detection
+- analyst workload
+- MTTA (Mean Time To Acknowledge)
+- MTTR (Mean Time To Resolve)
+
+Register and acknowledge a case:
+
+```bash
+socmind command-register socmind.db case.json \
+  --source wazuh \
+  --title "Authentication followed by suspicious execution"
+
+socmind command-ack socmind.db INC-2026-001
+socmind command-center socmind.db
+```
+
+Launch the dashboard with the queue:
+
+```bash
+socmind web examples/attack_chain.jsonl \
+  --case-id INC-2026-001 \
+  --command-db socmind.db
+```
+
+Detailed guide: [SOC Command Center](docs/soc-command-center.md)
+
 ## Detection engineering
 
 SOCMind also includes:
@@ -328,6 +361,7 @@ socmind analyze normalized.jsonl \
 - [Case 001](docs/cases/case-001-authentication-to-persistence.md)
 - [Real SOC Workflow](docs/real-soc-workflow.md)
 - [Portfolio / Interview Story](docs/portfolio-story.md)
+- [SOC Command Center](docs/soc-command-center.md)
 
 ## CI quality gate
 
