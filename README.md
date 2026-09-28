@@ -22,7 +22,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v1.0 — Real SOC Workspace**
+> **v1.1 — Live Integrations & Guided CLI**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -73,6 +73,74 @@ socmind analyze examples/linux_attack_chain.jsonl \
 ```
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
+
+## v1.1 Live Integrations & Guided CLI
+
+SOCMind can now connect to live SOC infrastructure while keeping credentials out of command-line password arguments.
+
+### Guided help
+
+```bash
+socmind help
+socmind help getting-started
+socmind help triage
+socmind help case-workflow
+socmind help integrations
+socmind help detection-engineering
+socmind help kali
+socmind help demo
+```
+
+Every command also has command-specific help:
+
+```bash
+socmind elastic-pull --help
+socmind wazuh-agents --help
+```
+
+Check the local installation:
+
+```bash
+socmind doctor
+```
+
+### Wazuh live API
+
+```bash
+export WAZUH_API_USER=soc-analyst
+export WAZUH_API_PASSWORD='...'
+
+socmind wazuh-check https://wazuh-manager:55000
+socmind wazuh-agents https://wazuh-manager:55000 --limit 50
+```
+
+### Elastic live search
+
+```bash
+export ELASTIC_API_KEY='...'
+
+socmind elastic-pull https://elastic:9200 'logs-*' \
+  -o elastic.ndjson \
+  --size 500
+```
+
+### MISP
+
+```bash
+export MISP_API_KEY='...'
+socmind misp-enrich normalized.jsonl https://misp.internal
+```
+
+### OpenCTI
+
+```bash
+export OPENCTI_TOKEN='...'
+socmind opencti-check https://opencti.internal
+```
+
+TLS verification is enabled by default. Use `--insecure` only for controlled self-signed lab environments.
+
+Detailed guide: [Live Integrations & CLI Help](docs/live-integrations.md)
 
 ## v1.0 Real SOC Workspace
 
@@ -456,6 +524,7 @@ socmind analyze normalized.jsonl \
 - [SOC Command Center](docs/soc-command-center.md)
 - [SOC Lead & Detection Health](docs/soc-lead-detection-health.md)
 - [v1.0 Real SOC Workspace](docs/v1-real-soc-workspace.md)
+- [Live Integrations & CLI Help](docs/live-integrations.md)
 
 ## CI quality gate
 
