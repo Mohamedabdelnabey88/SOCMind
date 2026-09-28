@@ -2,6 +2,33 @@ let payload=null,commandPayload=null,leadPayload=null,currentCaseId=null,queueOf
 const q=s=>document.querySelector(s);
 const qa=s=>[...document.querySelectorAll(s)];
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const formatApiError=detail=>{
+  if(!detail)return "Request failed";
+  if(typeof detail==="string")return detail;
+  if(typeof detail==="object"){
+    const parts=[];
+    if(detail.message)parts.push(detail.message);
+    if(Array.isArray(detail.blockers)&&detail.blockers.length)parts.push("Blockers: "+detail.blockers.join(", "));
+    if(Array.isArray(detail.warnings)&&detail.warnings.length)parts.push("Warnings: "+detail.warnings.join(", "));
+    return parts.join("\n")||JSON.stringify(detail);
+  }
+  return String(detail);
+};
+
+function renderCaseQuality(data){
+  const checklist=data.quality_checklist?.checklist||{};
+  qa("[data-quality]").forEach(input=>{input.checked=Boolean(checklist[input.dataset.quality]);});
+  const review=data.quality_review;
+  if(!review||review.error){
+    q("#caseQualityStatus").innerHTML='<div><b>Unavailable</b><span>'+esc(review?.error||"No linked evidence.")+'</span></div>';
+    return;
+  }
+  q("#caseQualityStatus").innerHTML=
+    '<div><b class="'+(review.closure_allowed?"ire-good":"ire-warn")+'">'+esc(review.readiness)+'</b><span>'+esc(review.completed)+'/'+esc(review.total)+' complete · closure '+(review.closure_allowed?"allowed":"blocked")+'</span></div>'+
+    review.blockers.map(x=>'<div><b class="ire-warn">BLOCK</b><span>'+esc(x)+'</span></div>').join("")+
+    review.warnings.map(x=>'<div><b>WARN</b><span>'+esc(x)+'</span></div>').join("")+
+    '<div><b>Last sign-off</b><span>'+esc(data.quality_checklist?.updated_by||"—")+' · '+esc(data.quality_checklist?.updated_at||"not saved")+'</span></div>';
+}
 let apiToken=sessionStorage.getItem("socmindToken")||"";
 
 async function apiFetch(url,options={}){
@@ -95,6 +122,7 @@ async function openCase(caseId){
   if(data.investigation&& !data.investigation.error){
     q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><div class="chips"><span class="chip">'+esc(data.investigation.summary.events)+' events</span><span class="chip">'+esc(data.investigation.summary.findings)+' findings</span><span class="chip">risk '+esc(data.investigation.summary.highest_score)+'</span></div>';
   }else q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><p class="score">'+(c.evidence_path?"Evidence could not be parsed.":"No evidence file linked to this case.")+'</p>';
+  renderCaseQuality(data);
   q("#caseDetailPanel").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
@@ -103,13 +131,29 @@ async function mutateCase(path,body=null){
   const opts={method:"POST",headers:{"Content-Type":"application/json"}};
   if(body!==null)opts.body=JSON.stringify(body);
   const res=await apiFetch("/api/cases/"+encodeURIComponent(currentCaseId)+path,opts);
-  if(!res.ok){const e=await res.json().catch(()=>({detail:"Request failed"}));alert(e.detail||"Request failed");return;}
+  if(!res.ok){const e=await res.json().catch(()=>({detail:"Request failed"}));alert(formatApiError(e.detail));return;}
   await openCase(currentCaseId);await loadCommandCenter();
 }
 q("#ackCase").addEventListener("click",()=>mutateCase("/acknowledge"));
 q("#assignCase").addEventListener("click",()=>{const owner=q("#assignOwner").value.trim();if(owner)mutateCase("/assign",{owner});});
 q("#transitionCase").addEventListener("click",()=>{const state=q("#transitionState").value;if(state)mutateCase("/transition",{state});});
 q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim();if(!text)return;mutateCase("/notes",{text}).then(()=>q("#noteText").value="");});
+q("#saveQuality").addEventListener("click",async()=>{
+  if(!currentCaseId)return;
+  const checklist={};
+  qa("[data-quality]").forEach(input=>{checklist[input.dataset.quality]=Boolean(input.checked);});
+  const res=await apiFetch("/api/cases/"+encodeURIComponent(currentCaseId)+"/quality-checklist",{
+    method:"PUT",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({checklist})
+  });
+  if(!res.ok){
+    const e=await res.json().catch(()=>({detail:"Quality sign-off failed"}));
+    alert(formatApiError(e.detail));
+    return;
+  }
+  await openCase(currentCaseId);
+});
 
 async function loadLeadHealth(){
   try{
