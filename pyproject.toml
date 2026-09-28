@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "socmind"
-version = "1.0.0"
+version = "1.1.0"
 description = "Cross-platform SOC Tier 1/2 investigation, detection-engineering and integration toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
