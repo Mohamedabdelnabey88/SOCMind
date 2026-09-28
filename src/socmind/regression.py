@@ -31,11 +31,30 @@ def _slug(value: str) -> str:
     return value.strip("-") or "candidate"
 
 
-def _candidate_rule(events: list[Event], gap_technique: str | None) -> str:
-    event = next(
+def _candidate_event(events: list[Event], gap_technique: str | None) -> Event:
+    if gap_technique == "T1110":
+        return next(
+            (item for item in events if item.event_id in {"4625", "ssh_auth_failed"}),
+            events[0],
+        )
+    if gap_technique == "T1078":
+        return next(
+            (item for item in events if item.event_id in {"4624", "ssh_auth_success"}),
+            events[0],
+        )
+    if gap_technique == "T1021.004":
+        return next(
+            (item for item in events if item.event_id == "ssh_auth_success"),
+            events[0],
+        )
+    return next(
         (item for item in events if item.command_line or item.process or item.event_id),
         events[0],
     )
+
+
+def _candidate_rule(events: list[Event], gap_technique: str | None) -> str:
+    event = _candidate_event(events, gap_technique)
     rule_id = f"socmind-candidate-{_slug(gap_technique or event.event_id)}"
     lines = [
         f"title: Candidate Detection for {gap_technique or event.event_id}",
