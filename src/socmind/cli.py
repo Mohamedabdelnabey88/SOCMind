@@ -15,7 +15,15 @@ from .case import export_case
 from .audit import append_audit
 from .case_workflow import assign, load_case, new_case, save_case, transition
 from .coverage import build_coverage, detection_gaps, render_coverage
-from .command_center import acknowledge_case, command_center_snapshot, upsert_case
+from .command_center import (
+    acknowledge_case,
+    add_case_note,
+    assign_case,
+    case_detail,
+    command_center_snapshot,
+    transition_case,
+    upsert_case,
+)
 from .detections import evaluate_rule, load_rule, load_rules
 from .engine import analyze
 from .enrichment import LocalIntelProvider, enrich_iocs
@@ -153,6 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     web_cmd.add_argument("--command-db", help="Optional SQLite SOC command-center database")
     web_cmd.add_argument("--rules", default="detections")
     web_cmd.add_argument("--dispositions")
+    web_cmd.add_argument("--api-token", help="Optional token required by web API mutations/reads")
 
     case_init = sub.add_parser("case-init", help="Create an operational SOC case record")
     case_init.add_argument("output")
@@ -198,6 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
     command_register.add_argument("case_file")
     command_register.add_argument("--source")
     command_register.add_argument("--title")
+    command_register.add_argument("--events", help="Normalized JSONL evidence path for case detail")
 
     command_view = sub.add_parser("command-center", help="Show SOC queue, SLA and workload metrics")
     command_view.add_argument("database")
@@ -206,6 +216,29 @@ def build_parser() -> argparse.ArgumentParser:
     command_ack = sub.add_parser("command-ack", help="Acknowledge a case and start MTTA tracking")
     command_ack.add_argument("database")
     command_ack.add_argument("case_id")
+
+    command_assign = sub.add_parser("command-assign", help="Assign a registered case")
+    command_assign.add_argument("database")
+    command_assign.add_argument("case_id")
+    command_assign.add_argument("--owner", required=True)
+    command_assign.add_argument("--actor", default="cli-analyst")
+
+    command_transition = sub.add_parser("command-transition", help="Transition a registered case")
+    command_transition.add_argument("database")
+    command_transition.add_argument("case_id")
+    command_transition.add_argument("--state", required=True)
+    command_transition.add_argument("--actor", default="cli-analyst")
+
+    command_note = sub.add_parser("command-note", help="Add a note to a registered case")
+    command_note.add_argument("database")
+    command_note.add_argument("case_id")
+    command_note.add_argument("--author", required=True)
+    command_note.add_argument("--text", required=True)
+    command_note.add_argument("--disposition")
+
+    command_show = sub.add_parser("command-show", help="Show one registered case with notes/audit")
+    command_show.add_argument("database")
+    command_show.add_argument("case_id")
 
     lead_cmd = sub.add_parser("lead-health", help="Show SOC lead detection-health metrics")
     lead_cmd.add_argument("events")
@@ -432,13 +465,38 @@ def main() -> None:
 
     if args.command == "command-register":
         case = load_case(args.case_file)
-        upsert_case(args.database, case, source=args.source, title=args.title)
+        upsert_case(args.database, case, source=args.source, title=args.title, evidence_path=args.events)
         print(f"Command center updated -> {args.database} | {case.case_id}")
         return
 
     if args.command == "command-ack":
-        acknowledge_case(args.database, args.case_id)
+        acknowledge_case(args.database, args.case_id, actor="cli-analyst")
         print(f"Case acknowledged -> {args.case_id}")
+        return
+
+    if args.command == "command-assign":
+        assign_case(args.database, args.case_id, args.owner, actor=args.actor)
+        print(f"Case assigned -> {args.case_id} | {args.owner}")
+        return
+
+    if args.command == "command-transition":
+        transition_case(args.database, args.case_id, args.state, actor=args.actor)
+        print(f"Case state -> {args.case_id} | {args.state}")
+        return
+
+    if args.command == "command-note":
+        note_id = add_case_note(
+            args.database,
+            args.case_id,
+            author=args.author,
+            text=args.text,
+            disposition=args.disposition,
+        )
+        print(f"Case note added -> {args.case_id} | note={note_id}")
+        return
+
+    if args.command == "command-show":
+        print(json.dumps(case_detail(args.database, args.case_id), indent=2))
         return
 
     if args.command == "command-center":
@@ -517,7 +575,7 @@ def main() -> None:
         except ImportError as exc:
             raise RuntimeError("Web dashboard requires: pip install 'socmind[web]'") from exc
         from .webapp import create_app
-        app = create_app(args.events, case_id=args.case_id, command_db=args.command_db, rules_dir=args.rules, dispositions_path=args.dispositions)
+        app = create_app(args.events, case_id=args.case_id, command_db=args.command_db, rules_dir=args.rules, dispositions_path=args.dispositions, api_token=args.api_token)
         print(f"SOCMind Web -> http://{args.host}:{args.port}")
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
         return
