@@ -12,8 +12,13 @@ from .command_center import (
     transition_case,
 )
 from .dashboard import build_dashboard_payload
+from .detection_replay import detection_replay_payload
+from .detections import load_rules
 from .io import load_jsonl
 from .lead_metrics import lead_snapshot
+from .quality_gate import load_checklist, quality_payload
+from .replay import replay_payload
+from .whatif import compare_rule_packs
 
 
 def create_app(
@@ -24,6 +29,8 @@ def create_app(
     rules_dir: str | Path = "detections",
     dispositions_path: str | Path | None = None,
     api_token: str | None = None,
+    proposed_rules_dir: str | Path | None = None,
+    quality_checklist_path: str | Path | None = None,
 ):
     try:
         from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
@@ -42,7 +49,7 @@ def create_app(
     assets = Path(__file__).with_name("web")
     app = FastAPI(
         title="SOCMind Real SOC Workspace",
-        version="1.2.0",
+        version="1.3.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
@@ -54,6 +61,12 @@ def create_app(
         Path(dispositions_path).resolve() if dispositions_path else None
     )
     app.state.api_token = api_token
+    app.state.proposed_rules_dir = (
+        Path(proposed_rules_dir).resolve() if proposed_rules_dir else None
+    )
+    app.state.quality_checklist_path = (
+        Path(quality_checklist_path).resolve() if quality_checklist_path else None
+    )
 
     @app.middleware("http")
     async def security_headers(request, call_next):
@@ -217,6 +230,54 @@ def create_app(
             return {"note_id": note_id, **case_detail(db, target_case_id)}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/ire/replay", dependencies=[Depends(require_token)])
+    def ire_replay():
+        try:
+            return replay_payload(load_jsonl(app.state.events_path))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/ire/detection-replay", dependencies=[Depends(require_token)])
+    def ire_detection_replay():
+        try:
+            events = load_jsonl(app.state.events_path)
+            rules = load_rules(app.state.rules_dir)
+            return detection_replay_payload(events, rules)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/ire/what-if", dependencies=[Depends(require_token)])
+    def ire_what_if():
+        if app.state.proposed_rules_dir is None:
+            return {"enabled": False}
+        try:
+            events = load_jsonl(app.state.events_path)
+            current = load_rules(app.state.rules_dir)
+            proposed = load_rules(app.state.proposed_rules_dir)
+            result = compare_rule_packs(events, current, proposed)
+            return {
+                "enabled": True,
+                "current": result.current,
+                "proposed": result.proposed,
+                "first_detection_step_improvement": result.first_detection_step_improvement,
+                "visibility_delta": result.visibility_delta,
+                "blind_step_delta": result.blind_step_delta,
+                "newly_covered_techniques": result.newly_covered_techniques,
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/ire/quality", dependencies=[Depends(require_token)])
+    def ire_quality():
+        try:
+            checklist = load_checklist(app.state.quality_checklist_path)
+            return quality_payload(
+                load_jsonl(app.state.events_path),
+                checklist=checklist,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.get("/api/lead-health", dependencies=[Depends(require_token)])
     def lead_health():

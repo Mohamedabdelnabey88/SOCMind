@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.0 — Investigation Replay Engine
+
+- step-by-step investigation replay
+- deterministic hypothesis-confidence deltas
+- incident-specific detection replay
+- first-detection-step measurement
+- blind-step analysis
+- incident visibility percentage
+- current-vs-proposed detection What-If comparison
+- investigation quality gate
+- case-to-detection regression package generator
+- experimental candidate-rule generation with validation checklist
+- IRE web dashboard and APIs
+- regression test preventing duplicate PowerShell findings from network events
+
+
 ## 1.2.0 — Hardening & Portfolio Release
 
 - secure remote-bind guard

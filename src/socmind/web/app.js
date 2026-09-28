@@ -17,9 +17,9 @@ q("#setToken").addEventListener("click",()=>{
   if(value===null)return;
   apiToken=value.trim();
   if(apiToken)sessionStorage.setItem("socmindToken",apiToken);else sessionStorage.removeItem("socmindToken");
-  load();loadCommandCenter();loadLeadHealth();
+  load();loadCommandCenter();loadLeadHealth();loadIRE();loadIRE();
 });
-q("#refresh").addEventListener("click",()=>{load();loadCommandCenter();loadLeadHealth();});
+q("#refresh").addEventListener("click",()=>{load();loadCommandCenter();loadLeadHealth();loadIRE();});
 q("#applyFilters").addEventListener("click",loadCommandCenter);
 q("#closeDetail").addEventListener("click",()=>q("#caseDetailPanel").classList.add("hidden"));
 
@@ -30,6 +30,7 @@ qa(".nav").forEach(btn=>btn.addEventListener("click",()=>{
   if(btn.dataset.target==="graph"&&payload)drawGraph(payload.graph);
   if(btn.dataset.target==="command")loadCommandCenter();
   if(btn.dataset.target==="lead")loadLeadHealth();
+  if(btn.dataset.target==="ire")loadIRE();
 }));
 
 function findingCard(f){
@@ -121,6 +122,61 @@ async function loadLeadHealth(){
     q("#topUsers").innerHTML=leadPayload.top_users.map(item=>'<div><b>'+esc(item.user)+'</b><span>'+esc(item.events)+' events</span></div>').join("")||"<div>No user telemetry.</div>";
     q("#topHosts").innerHTML=leadPayload.top_hosts.map(item=>'<div><b>'+esc(item.host)+'</b><span>'+esc(item.events)+' events</span></div>').join("")||"<div>No host telemetry.</div>";
   }catch(err){q("#leadState").textContent="Unavailable";}
+}
+
+
+async function loadIRE(){
+  try{
+    const [replayRes,detectionRes,whatIfRes,qualityRes]=await Promise.all([
+      apiFetch("/api/ire/replay"),
+      apiFetch("/api/ire/detection-replay"),
+      apiFetch("/api/ire/what-if"),
+      apiFetch("/api/ire/quality")
+    ]);
+    if(!replayRes.ok||!detectionRes.ok||!whatIfRes.ok||!qualityRes.ok)throw new Error("IRE API unavailable");
+    const replay=await replayRes.json();
+    const detection=await detectionRes.json();
+    const whatif=await whatIfRes.json();
+    const quality=await qualityRes.json();
+
+    q("#ireState").textContent="Replay ready";
+    const metrics=[
+      ["First Detection",detection.first_detection_step==null?"—":"Step "+detection.first_detection_step],
+      ["Blind Before Detect",detection.blind_steps_before_first_detection],
+      ["Visibility",detection.visibility_percent+"%"],
+      ["Detection Gaps",detection.gap_techniques.length],
+      ["Quality",quality.percentage+"%"]
+    ];
+    q("#ireCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
+
+    q("#ireDetection").innerHTML=
+      '<div><b>Observed techniques</b><span>'+esc(detection.observed_techniques.join(", ")||"—")+'</span></div>'+
+      '<div><b>Covered techniques</b><span>'+esc(detection.covered_techniques.join(", ")||"—")+'</span></div>'+
+      '<div><b>Detection gaps</b><span class="'+(detection.gap_techniques.length?"ire-warn":"")+'">'+esc(detection.gap_techniques.join(", ")||"None")+'</span></div>';
+
+    if(whatif.enabled){
+      const early=whatif.first_detection_step_improvement;
+      q("#ireWhatIf").innerHTML=
+        '<div><b>Earlier detection</b><span>'+(early==null?"—":esc(early)+" step(s)")+'</span></div>'+
+        '<div><b>Visibility delta</b><span class="'+(whatif.visibility_delta>0?"ire-good":"")+'">'+esc((whatif.visibility_delta>=0?"+":"")+whatif.visibility_delta)+"%</span></div>"+
+        '<div><b>Blind-step reduction</b><span class="'+(whatif.blind_step_delta>0?"ire-good":"")+'">'+esc((whatif.blind_step_delta>=0?"+":"")+whatif.blind_step_delta)+'</span></div>'+
+        '<div><b>New coverage</b><span>'+esc(whatif.newly_covered_techniques.join(", ")||"—")+'</span></div>';
+    }else{
+      q("#ireWhatIf").innerHTML='<div>Launch with <b>--proposed-rules</b> to compare a proposed pack.</div>';
+    }
+
+    q("#ireQuality").innerHTML=quality.items.map(item=>
+      '<div><b class="'+(item.complete?"ire-good":"ire-warn")+'">'+(item.complete?"✓ ":"○ ")+esc(item.label)+'</b><span>'+esc(item.evidence)+'</span></div>'
+    ).join("");
+
+    q("#ireReplay").innerHTML=replay.steps.map(step=>{
+      const findings=step.new_findings.map(x=>'<span class="chip">+'+esc(x)+'</span>').join("");
+      const hypotheses=step.hypotheses.map(h=>'<div class="ire-hyp">'+esc(h.name)+' · '+esc(h.confidence)+'% · '+esc((h.delta>=0?"+":"")+h.delta)+'</div>').join("");
+      return '<div class="ire-step"><time>Step '+esc(step.index)+' · '+esc(step.timestamp)+'</time><strong>'+esc(step.source)+' · '+esc(step.event_id)+' · '+esc(step.host)+'</strong><div class="chips">'+findings+'</div>'+hypotheses+'</div>';
+    }).join("");
+  }catch(err){
+    q("#ireState").textContent="Unavailable";
+  }
 }
 
 function drawGraph(graph){

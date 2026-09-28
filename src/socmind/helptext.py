@@ -122,6 +122,32 @@ Run a repeatable local benchmark:
 
 This benchmark is for comparing the same machine/environment over time; it is not a universal production capacity guarantee.
 """,
+    "ire": """SOCMind Investigation Replay Engine (IRE)
+
+Replay how the investigation evolved:
+  socmind replay examples/attack_chain.jsonl
+
+Replay the same incident against the current rule pack:
+  socmind detection-replay examples/attack_chain.jsonl --rules detections
+
+Compare current vs proposed detections:
+  socmind what-if examples/attack_chain.jsonl \
+    --current-rules detections \
+    --proposed-rules examples/proposed-rules
+
+Review investigation completeness:
+  socmind case-review examples/attack_chain.jsonl \
+    --checklist examples/quality-checklist.json
+
+Turn a confirmed incident into detection-engineering artifacts:
+  socmind learn-from-case examples/attack_chain.jsonl \
+    --rules detections \
+    --case-id INC-001 \
+    -o regression-pack
+
+IRE is designed to close the loop:
+incident -> investigation -> blind spots -> detection change -> regression.
+""",
     "demo": """SOCMind Portfolio Demo
 
   socmind demo-init -o socmind-demo
@@ -151,6 +177,7 @@ Topics:
   kali
   security
   performance
+  ire
   demo
 
 Common first commands:

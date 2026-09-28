@@ -1,0 +1,7 @@
+{
+  "iocs_reviewed": true,
+  "persistence_validated": true,
+  "scope_validated": true,
+  "detection_feedback": true,
+  "handoff_complete": true
+}
