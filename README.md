@@ -22,7 +22,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v0.8 — Multi-Case SOC Command Center**
+> **v0.9 — SOC Lead & Detection Health**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -288,6 +288,42 @@ socmind web examples/attack_chain.jsonl \
 
 Detailed guide: [SOC Command Center](docs/soc-command-center.md)
 
+## SOC Lead & Detection Health
+
+SOCMind now adds a shift-lead view focused on the quality of detections and the health of the SOC workflow:
+
+- ATT&CK coverage for observed techniques
+- TP / FP ratios from analyst dispositions
+- noisy detection identification
+- explainable per-rule health score
+- top users and hosts by event concentration
+- shift brief combining operations + detection health
+
+CLI:
+
+```bash
+socmind lead-health examples/attack_chain.jsonl \
+  --rules detections \
+  --dispositions examples/dispositions.jsonl
+
+socmind shift-brief socmind.db examples/attack_chain.jsonl \
+  --rules detections \
+  --dispositions examples/dispositions.jsonl \
+  -o shift-brief.md
+```
+
+Web:
+
+```bash
+socmind web examples/attack_chain.jsonl \
+  --case-id INC-2026-001 \
+  --command-db socmind.db \
+  --rules detections \
+  --dispositions examples/dispositions.jsonl
+```
+
+Detailed guide: [SOC Lead & Detection Health](docs/soc-lead-detection-health.md)
+
 ## Detection engineering
 
 SOCMind also includes:
@@ -362,6 +398,7 @@ socmind analyze normalized.jsonl \
 - [Real SOC Workflow](docs/real-soc-workflow.md)
 - [Portfolio / Interview Story](docs/portfolio-story.md)
 - [SOC Command Center](docs/soc-command-center.md)
+- [SOC Lead & Detection Health](docs/soc-lead-detection-health.md)
 
 ## CI quality gate
 
