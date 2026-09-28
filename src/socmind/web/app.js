@@ -1,4 +1,4 @@
-let payload=null,commandPayload=null,leadPayload=null,currentCaseId=null,queueOffset=0;\nconst queueLimit=25;
+let payload=null,commandPayload=null,leadPayload=null,currentCaseId=null,queueOffset=0,currentPrincipal=null;\nconst queueLimit=25;
 const q=s=>document.querySelector(s);
 const qa=s=>[...document.querySelectorAll(s)];
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -38,13 +38,46 @@ async function apiFetch(url,options={}){
   if(res.status===401) q("#health").textContent="Auth required";
   return res;
 }
+const roleCapabilities={
+  viewer:new Set([]),
+  analyst:new Set(["ack","note","quality"]),
+  "senior-analyst":new Set(["ack","note","quality","assign","transition"]),
+  lead:new Set(["ack","note","quality","assign","transition"]),
+  admin:new Set(["ack","note","quality","assign","transition"])
+};
+const uiCan=cap=>Boolean(currentPrincipal&&roleCapabilities[currentPrincipal.role]?.has(cap));
+
+function applyPermissions(){
+  const setDisabled=(selector,disabled)=>{const el=q(selector);if(el)el.disabled=disabled;};
+  setDisabled("#ackCase",!uiCan("ack"));
+  setDisabled("#assignCase",!uiCan("assign"));
+  setDisabled("#assignOwner",!uiCan("assign"));
+  setDisabled("#transitionCase",!uiCan("transition"));
+  setDisabled("#transitionState",!uiCan("transition"));
+  setDisabled("#addNote",!uiCan("note"));
+  setDisabled("#noteText",!uiCan("note"));
+  setDisabled("#saveQuality",!uiCan("quality"));
+  qa("[data-quality]").forEach(input=>input.disabled=!uiCan("quality"));
+}
+
+async function loadIdentity(){
+  try{
+    const res=await apiFetch("/api/me");
+    if(!res.ok){currentPrincipal=null;applyPermissions();return;}
+    currentPrincipal=await res.json();
+    applyPermissions();
+  }catch(err){
+    currentPrincipal=null;
+    applyPermissions();
+  }
+}
 
 q("#setToken").addEventListener("click",()=>{
   const value=prompt("SOCMind API token (leave blank to clear)",apiToken);
   if(value===null)return;
   apiToken=value.trim();
   if(apiToken)sessionStorage.setItem("socmindToken",apiToken);else sessionStorage.removeItem("socmindToken");
-  load();loadCommandCenter();loadLeadHealth();loadIRE();
+  loadIdentity();loadIdentity();load();loadCommandCenter();loadLeadHealth();loadIRE();
 });
 q("#refresh").addEventListener("click",()=>{load();loadCommandCenter();loadLeadHealth();loadIRE();});
 q("#applyFilters").addEventListener("click",()=>{queueOffset=0;loadCommandCenter();});\nq("#queuePrev").addEventListener("click",()=>{queueOffset=Math.max(0,queueOffset-queueLimit);loadCommandCenter();});\nq("#queueNext").addEventListener("click",()=>{if(commandPayload?.pagination?.has_more){queueOffset+=queueLimit;loadCommandCenter();}});
@@ -123,6 +156,7 @@ async function openCase(caseId){
     q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><div class="chips"><span class="chip">'+esc(data.investigation.summary.events)+' events</span><span class="chip">'+esc(data.investigation.summary.findings)+' findings</span><span class="chip">risk '+esc(data.investigation.summary.highest_score)+'</span></div>';
   }else q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><p class="score">'+(c.evidence_path?"Evidence could not be parsed.":"No evidence file linked to this case.")+'</p>';
   renderCaseQuality(data);
+  applyPermissions();
   q("#caseDetailPanel").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
