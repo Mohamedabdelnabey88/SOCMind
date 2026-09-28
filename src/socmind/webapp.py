@@ -26,10 +26,9 @@ def create_app(
     api_token: str | None = None,
 ):
     try:
-        from fastapi import Depends, FastAPI, Header, HTTPException, Query
+        from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
         from fastapi.responses import FileResponse
         from fastapi.staticfiles import StaticFiles
-        from pydantic import BaseModel, Field
     except ImportError as exc:
         raise RuntimeError(
             "Web dashboard requires optional dependencies. "
@@ -55,19 +54,6 @@ def create_app(
         Path(dispositions_path).resolve() if dispositions_path else None
     )
     app.state.api_token = api_token
-
-    class AssignRequest(BaseModel):
-        owner: str = Field(min_length=1, max_length=120)
-        actor: str = Field(default="web-analyst", min_length=1, max_length=120)
-
-    class TransitionRequest(BaseModel):
-        state: str = Field(min_length=1, max_length=40)
-        actor: str = Field(default="web-analyst", min_length=1, max_length=120)
-
-    class NoteRequest(BaseModel):
-        author: str = Field(default="web-analyst", min_length=1, max_length=120)
-        text: str = Field(min_length=1, max_length=5000)
-        disposition: str | None = Field(default=None, max_length=80)
 
     def require_token(x_socmind_token: str | None = Header(default=None)) -> None:
         expected = app.state.api_token
@@ -164,14 +150,14 @@ def create_app(
         "/api/cases/{target_case_id}/assign",
         dependencies=[Depends(require_token)],
     )
-    def assign_endpoint(target_case_id: str, request: AssignRequest):
+    def assign_endpoint(target_case_id: str, request: dict = Body(...)):
         db = require_db()
         try:
             assign_case(
                 db,
                 target_case_id,
-                request.owner,
-                actor=request.actor,
+                str(request.get("owner", "")).strip(),
+                actor=str(request.get("actor", "web-analyst")),
             )
             return case_detail(db, target_case_id)
         except ValueError as exc:
@@ -181,14 +167,14 @@ def create_app(
         "/api/cases/{target_case_id}/transition",
         dependencies=[Depends(require_token)],
     )
-    def transition_endpoint(target_case_id: str, request: TransitionRequest):
+    def transition_endpoint(target_case_id: str, request: dict = Body(...)):
         db = require_db()
         try:
             transition_case(
                 db,
                 target_case_id,
-                request.state,
-                actor=request.actor,
+                str(request.get("state", "")).strip(),
+                actor=str(request.get("actor", "web-analyst")),
             )
             return case_detail(db, target_case_id)
         except ValueError as exc:
@@ -198,15 +184,15 @@ def create_app(
         "/api/cases/{target_case_id}/notes",
         dependencies=[Depends(require_token)],
     )
-    def note_endpoint(target_case_id: str, request: NoteRequest):
+    def note_endpoint(target_case_id: str, request: dict = Body(...)):
         db = require_db()
         try:
             note_id = add_case_note(
                 db,
                 target_case_id,
-                author=request.author,
-                text=request.text,
-                disposition=request.disposition,
+                author=str(request.get("author", "web-analyst")),
+                text=str(request.get("text", "")),
+                disposition=request.get("disposition"),
             )
             return {"note_id": note_id, **case_detail(db, target_case_id)}
         except ValueError as exc:
