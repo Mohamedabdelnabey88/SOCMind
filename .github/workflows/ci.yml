@@ -69,6 +69,9 @@ jobs:
       - run: socmind what-if examples/attack_chain.jsonl --current-rules detections --proposed-rules examples/proposed-rules --json
       - run: socmind case-review examples/attack_chain.jsonl --checklist examples/quality-checklist.json --json
       - run: socmind learn-from-case examples/attack_chain.jsonl --rules detections --case-id CI-IRE-001 -o ire-regression
+      - run: socmind help reasoning
+      - run: socmind contradictions examples/attack_chain.jsonl --json
+      - run: socmind similar-cases examples/attack_chain.jsonl --database ci-demo/socmind-demo.db --exclude-case-id DEMO-P1-001 --json
 
   kali:
     runs-on: ubuntu-latest
@@ -127,13 +130,16 @@ jobs:
           .venv/bin/socmind what-if examples/attack_chain.jsonl --current-rules detections --proposed-rules examples/proposed-rules --json
           .venv/bin/socmind case-review examples/attack_chain.jsonl --checklist examples/quality-checklist.json --json
           .venv/bin/socmind learn-from-case examples/attack_chain.jsonl --rules detections --case-id KALI-IRE-001 -o kali-ire-regression
+          .venv/bin/socmind help reasoning
+          .venv/bin/socmind contradictions examples/attack_chain.jsonl --json
+          .venv/bin/socmind similar-cases examples/attack_chain.jsonl --database kali-demo/socmind-demo.db --exclude-case-id DEMO-P1-001 --json
       - name: Exercise web dashboard on Kali
         shell: bash
         run: |
           .venv/bin/socmind web examples/attack_chain.jsonl --case-id CI-KALI-WEB --command-db kali-soc.db --rules detections --proposed-rules examples/proposed-rules --quality-checklist examples/quality-checklist.json --dispositions examples/dispositions.jsonl --api-token ci-secret --host 127.0.0.1 --port 8765 > /tmp/socmind-web.log 2>&1 &
           pid=$!
           sleep 3
-          python3 -c "import json,urllib.request; hdr={'X-SOCMind-Token':'ci-secret'}; h=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health')); l=json.load(urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8765/api/lead-health',headers=hdr))); w=json.load(urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8765/api/ire/what-if',headers=hdr))); q=json.load(urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8765/api/ire/quality',headers=hdr))); assert h['status']=='ok' and h['auth_required'] and l['summary']['rules']>0 and w['enabled'] and w['first_detection_step_improvement']>0 and q['total']>=10"
+          python3 -c "import json,urllib.request; hdr={'X-SOCMind-Token':'ci-secret'}; get=lambda p: json.load(urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8765'+p,headers=hdr))); h=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health')); l=get('/api/lead-health'); w=get('/api/ire/what-if'); q=get('/api/ire/quality'); c=get('/api/reasoning/contradictions'); s=get('/api/reasoning/similar'); assert h['status']=='ok' and h['auth_required'] and l['summary']['rules']>0 and w['enabled'] and w['first_detection_step_improvement']>0 and q['total']>=10 and c['summary']['hypotheses']>0 and s['enabled']"
           kill $pid
 
 
@@ -152,6 +158,7 @@ jobs:
       - run: wheel-venv/bin/socmind help getting-started
       - run: wheel-venv/bin/socmind help ire
       - run: wheel-venv/bin/socmind detection-replay examples/attack_chain.jsonl --rules detections --json
+      - run: wheel-venv/bin/socmind contradictions examples/attack_chain.jsonl --json
       - run: wheel-venv/bin/socmind doctor
       - name: Verify packaged web assets
         shell: bash
