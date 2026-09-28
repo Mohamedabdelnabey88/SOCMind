@@ -4,6 +4,7 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .contradiction import contradiction_payload
 from .engine import analyze
 from .hypothesis import generate_hypotheses
 from .ioc import extract_iocs
@@ -16,6 +17,8 @@ class QualityItem:
     label: str
     complete: bool
     evidence: str
+    severity: str
+    status: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +28,26 @@ class QualityReview:
     percentage: float
     items: list[QualityItem]
     outstanding: list[str]
+    blockers: list[str]
+    warnings: list[str]
+    readiness: str
+    closure_allowed: bool
+
+
+def _item(
+    key: str,
+    label: str,
+    complete: bool,
+    evidence: str,
+    severity: str,
+) -> QualityItem:
+    if complete:
+        status = "PASS"
+    elif severity == "required":
+        status = "BLOCK"
+    else:
+        status = "WARN"
+    return QualityItem(key, label, complete, evidence, severity, status)
 
 
 def review_investigation(
@@ -35,10 +58,13 @@ def review_investigation(
     checklist = checklist or {}
     findings = analyze(events)
     hypotheses = generate_hypotheses(findings)
+    contradictions = contradiction_payload(events)
+
     has_process_ancestry = any(
         event.process and event.parent_process for event in events
     )
-    has_iocs = bool(extract_iocs(events))
+    iocs = extract_iocs(events)
+    has_iocs = bool(iocs)
     techniques = {
         technique
         for finding in findings
@@ -47,78 +73,175 @@ def review_investigation(
     has_persistence = any(
         "Persistence" in finding.title for finding in findings
     )
-    has_scope = len({event.host for event in events if event.host}) > 1 or bool(
-        checklist.get("scope_validated")
+    scope_validated = bool(checklist.get("scope_validated"))
+    has_scope_context = (
+        len({event.host for event in events if event.host}) > 1
+        or scope_validated
     )
-    contradicting = any(h.contradicting for h in hypotheses)
+    contradiction_reviewed = bool(
+        contradictions["summary"]["hypotheses"]
+        and (
+            contradictions["summary"]["contradicting_points"] > 0
+            or contradictions["summary"]["validation_gaps"] > 0
+            or checklist.get("contradictions_reviewed")
+        )
+    )
 
     items = [
-        QualityItem("evidence", "Evidence available", bool(events), f"{len(events)} event(s)"),
-        QualityItem("timeline", "Timeline reconstructed", len(events) >= 2, f"{len(events)} ordered event(s)"),
-        QualityItem(
-            "process_ancestry",
-            "Process ancestry available",
-            has_process_ancestry,
-            "parent/child process evidence present" if has_process_ancestry else "no parent/child process pair",
+        _item(
+            "evidence",
+            "Evidence available",
+            bool(events),
+            f"{len(events)} event(s)",
+            "required",
         ),
-        QualityItem(
+        _item(
+            "timeline",
+            "Timeline reconstructed",
+            len(events) >= 2,
+            f"{len(events)} ordered event(s)",
+            "required",
+        ),
+        _item(
+            "process_ancestry",
+            "Process ancestry reviewed",
+            has_process_ancestry or bool(checklist.get("process_ancestry_reviewed")),
+            (
+                "parent/child process evidence present"
+                if has_process_ancestry
+                else "no parent/child process pair; analyst review not recorded"
+            ),
+            "advisory",
+        ),
+        _item(
             "iocs",
             "IOCs identified/reviewed",
-            has_iocs and bool(checklist.get("iocs_reviewed")),
-            "IOCs present and analyst review recorded" if has_iocs and checklist.get("iocs_reviewed") else (
-                "IOCs present but review not recorded" if has_iocs else "no IOCs extracted"
+            (not has_iocs) or bool(checklist.get("iocs_reviewed")),
+            (
+                f"{len(iocs)} IOC(s) present and analyst review recorded"
+                if has_iocs and checklist.get("iocs_reviewed")
+                else (
+                    f"{len(iocs)} IOC(s) present but review not recorded"
+                    if has_iocs
+                    else "no IOCs extracted; not applicable"
+                )
             ),
+            "conditional" if has_iocs else "advisory",
         ),
-        QualityItem("attack", "MITRE ATT&CK mapping", bool(techniques), f"{len(techniques)} technique(s)"),
-        QualityItem("hypotheses", "Hypotheses documented", bool(hypotheses), f"{len(hypotheses)} hypothesis/hypotheses"),
-        QualityItem(
-            "contradicting",
-            "Contradicting evidence / validation gaps documented",
-            contradicting,
-            "validation gaps retained" if contradicting else "no contradicting/gap evidence recorded",
+        _item(
+            "attack",
+            "MITRE ATT&CK mapping",
+            bool(techniques),
+            f"{len(techniques)} technique(s)",
+            "required",
         ),
-        QualityItem(
+        _item(
+            "hypotheses",
+            "Hypotheses documented",
+            bool(hypotheses),
+            f"{len(hypotheses)} hypothesis/hypotheses",
+            "required",
+        ),
+        _item(
+            "contradictions",
+            "Contradicting evidence / validation gaps reviewed",
+            contradiction_reviewed,
+            (
+                f"{contradictions['summary']['contradicting_points']} contradiction/context point(s), "
+                f"{contradictions['summary']['validation_gaps']} validation gap(s)"
+            ),
+            "required",
+        ),
+        _item(
             "persistence",
             "Persistence validation",
             (not has_persistence) or bool(checklist.get("persistence_validated")),
-            "not observed" if not has_persistence else (
-                "analyst validation recorded" if checklist.get("persistence_validated") else "persistence observed; validation not recorded"
+            (
+                "not observed; not applicable"
+                if not has_persistence
+                else (
+                    "analyst validation recorded"
+                    if checklist.get("persistence_validated")
+                    else "persistence observed; validation not recorded"
+                )
             ),
+            "conditional" if has_persistence else "advisory",
         ),
-        QualityItem(
+        _item(
             "scope",
             "Scope validation",
-            has_scope,
-            "multi-host scope or analyst validation recorded" if has_scope else "single-host scope; validation not recorded",
+            has_scope_context,
+            (
+                "multi-host evidence or analyst scope validation recorded"
+                if has_scope_context
+                else "single-host evidence; scope validation not recorded"
+            ),
+            "required",
         ),
-        QualityItem(
+        _item(
             "detection_feedback",
             "Detection feedback completed",
             bool(checklist.get("detection_feedback")),
-            "analyst feedback recorded" if checklist.get("detection_feedback") else "not recorded",
+            (
+                "analyst feedback recorded"
+                if checklist.get("detection_feedback")
+                else "not recorded"
+            ),
+            "advisory",
         ),
-        QualityItem(
+        _item(
             "handoff",
             "Handoff readiness",
             bool(checklist.get("handoff_complete")),
-            "handoff marked complete" if checklist.get("handoff_complete") else "not recorded",
+            (
+                "handoff marked complete"
+                if checklist.get("handoff_complete")
+                else "handoff not marked complete"
+            ),
+            "required",
         ),
     ]
+
     completed = sum(1 for item in items if item.complete)
+    blockers = [
+        item.label
+        for item in items
+        if not item.complete and item.severity == "required"
+    ]
+    warnings = [
+        item.label
+        for item in items
+        if not item.complete and item.severity != "required"
+    ]
     outstanding = [item.label for item in items if not item.complete]
+
+    if blockers:
+        readiness = "BLOCKED"
+    elif warnings:
+        readiness = "NEEDS_REVIEW"
+    else:
+        readiness = "READY"
+
     return QualityReview(
         completed=completed,
         total=len(items),
         percentage=round((completed / len(items)) * 100, 1),
         items=items,
         outstanding=outstanding,
+        blockers=blockers,
+        warnings=warnings,
+        readiness=readiness,
+        closure_allowed=not blockers,
     )
 
 
 def load_checklist(path: str | Path | None) -> dict:
     if path is None:
         return {}
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("Quality checklist must be a JSON object")
+    return raw
 
 
 def quality_payload(events: list[Event], *, checklist: dict | None = None) -> dict:
@@ -127,8 +250,12 @@ def quality_payload(events: list[Event], *, checklist: dict | None = None) -> di
         "completed": review.completed,
         "total": review.total,
         "percentage": review.percentage,
+        "readiness": review.readiness,
+        "closure_allowed": review.closure_allowed,
         "items": [asdict(item) for item in review.items],
         "outstanding": review.outstanding,
+        "blockers": review.blockers,
+        "warnings": review.warnings,
     }
 
 
@@ -137,12 +264,19 @@ def render_quality_review(events: list[Event], *, checklist: dict | None = None)
     lines = [
         "SOCMind Investigation Quality Gate",
         "==================================",
+        f"readiness={review.readiness}",
+        f"closure_allowed={str(review.closure_allowed).lower()}",
         f"completeness={review.completed}/{review.total} ({review.percentage}%)",
         "",
     ]
     for item in review.items:
-        lines.append(f"[{'OK' if item.complete else 'TODO'}] {item.label} | {item.evidence}")
-    if review.outstanding:
-        lines += ["", "Outstanding:"]
-        lines += [f"- {item}" for item in review.outstanding]
+        lines.append(
+            f"[{item.status}] {item.label} | severity={item.severity} | {item.evidence}"
+        )
+    if review.blockers:
+        lines += ["", "Blocking closure:"]
+        lines += [f"- {item}" for item in review.blockers]
+    if review.warnings:
+        lines += ["", "Warnings:"]
+        lines += [f"- {item}" for item in review.warnings]
     return "\n".join(lines)
