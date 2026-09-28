@@ -272,9 +272,20 @@ def command_center_snapshot(
     priority: str | None = None,
     state: str | None = None,
     owner: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> dict:
     all_cases = list_cases(db_path)
-    cases = list_cases(db_path, query=query, priority=priority, state=state, owner=owner)
+    filtered_cases = list_cases(
+        db_path,
+        query=query,
+        priority=priority,
+        state=state,
+        owner=owner,
+    )
+    safe_limit = max(1, min(int(limit), 200))
+    safe_offset = max(0, int(offset))
+    cases = filtered_cases[safe_offset:safe_offset + safe_limit]
     active_all = [c for c in all_cases if c.state not in {"resolved", "false-positive"}]
     breached = []
     for case in active_all:
