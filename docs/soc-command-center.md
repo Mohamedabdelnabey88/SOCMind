@@ -10,6 +10,7 @@ The Command Center adds the operational view a SOC analyst or shift lead needs a
 - SLA breaches
 - analyst workload
 - resolved cases
+- MTTA for acknowledged cases
 - MTTR for resolved cases
 - per-case state, priority, source and ownership
 
@@ -33,6 +34,14 @@ socmind command-register socmind.db case-001.json \
   --source wazuh \
   --title "Authentication followed by suspicious execution"
 ```
+
+Acknowledge the case when an analyst picks it up:
+
+```bash
+socmind command-ack socmind.db INC-001
+```
+
+This records the first acknowledgement time and feeds MTTA.
 
 ## View the queue in the terminal
 
@@ -70,6 +79,7 @@ This feature demonstrates that SOCMind is not limited to one alert at a time. It
 - Which cases have breached SLA?
 - Which investigations are unassigned?
 - Which analyst is carrying the most active cases?
-- How quickly are cases being resolved?
+- How quickly are cases being acknowledged (MTTA)?
+- How quickly are cases being resolved (MTTR)?
 
 The default SLA targets in the portfolio are examples and should be replaced by the organization’s actual SLA policy in production.
