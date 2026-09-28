@@ -1,5 +1,7 @@
 {
   "iocs_reviewed": true,
+  "process_ancestry_reviewed": true,
+  "contradictions_reviewed": true,
   "persistence_validated": true,
   "scope_validated": true,
   "detection_feedback": true,
