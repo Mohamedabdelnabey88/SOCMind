@@ -757,7 +757,12 @@ def main() -> None:
     if args.command == "benchmark":
         result = run_benchmark(args.events)
         if args.json:
-            print(json.dumps(benchmark_payload(args.events), indent=2))
+            print(json.dumps({
+                "events": result.events,
+                "findings": result.findings,
+                "elapsed_seconds": result.elapsed_seconds,
+                "events_per_second": result.events_per_second,
+            }, indent=2))
         else:
             print("SOCMind Benchmark")
             print("=================")
