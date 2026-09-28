@@ -25,11 +25,22 @@ class SimilarCase:
     case_id: str
     title: str
     score: float
+    confidence: str
+    matched_dimensions: int
+    comparable_dimensions: int
     shared_techniques: list[str]
     shared_event_ids: list[str]
     shared_processes: list[str]
     shared_iocs: list[str]
     explanation: list[str]
+
+
+WEIGHTS = {
+    "techniques": 0.40,
+    "event_ids": 0.20,
+    "processes": 0.20,
+    "iocs": 0.20,
+}
 
 
 def _technique_id(value: str) -> str:
@@ -56,27 +67,62 @@ def fingerprint_case(events: list[Event]) -> CaseFingerprint:
 
 
 def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
-    if not left and not right:
-        return 0.0
     union = left | right
     return len(left & right) / len(union) if union else 0.0
 
 
-def compare_fingerprints(left: CaseFingerprint, right: CaseFingerprint) -> tuple[float, dict]:
-    parts = {
-        "techniques": _jaccard(left.techniques, right.techniques),
-        "event_ids": _jaccard(left.event_ids, right.event_ids),
-        "processes": _jaccard(left.processes, right.processes),
-        "iocs": _jaccard(left.iocs, right.iocs),
+def _dimension_values(
+    fingerprint: CaseFingerprint,
+) -> dict[str, frozenset[str]]:
+    return {
+        "techniques": fingerprint.techniques,
+        "event_ids": fingerprint.event_ids,
+        "processes": fingerprint.processes,
+        "iocs": fingerprint.iocs,
     }
-    weights = {
-        "techniques": 0.40,
-        "event_ids": 0.20,
-        "processes": 0.20,
-        "iocs": 0.20,
-    }
-    score = sum(parts[key] * weights[key] for key in parts) * 100
-    return round(score, 1), parts
+
+
+def compare_fingerprints(
+    left: CaseFingerprint,
+    right: CaseFingerprint,
+) -> tuple[float, dict]:
+    left_values = _dimension_values(left)
+    right_values = _dimension_values(right)
+
+    parts: dict[str, float] = {}
+    comparable_weight = 0.0
+    weighted_score = 0.0
+    for key, weight in WEIGHTS.items():
+        left_set = left_values[key]
+        right_set = right_values[key]
+        if not left_set and not right_set:
+            parts[key] = 0.0
+            continue
+        score = _jaccard(left_set, right_set)
+        parts[key] = score
+        comparable_weight += weight
+        weighted_score += score * weight
+
+    normalized = (
+        (weighted_score / comparable_weight) * 100
+        if comparable_weight
+        else 0.0
+    )
+    return round(normalized, 1), parts
+
+
+def _confidence(
+    score: float,
+    matched_dimensions: int,
+    comparable_dimensions: int,
+) -> str:
+    if comparable_dimensions < 2:
+        return "limited"
+    if matched_dimensions >= 3 and score >= 70:
+        return "high"
+    if matched_dimensions >= 2 and score >= 45:
+        return "moderate"
+    return "limited"
 
 
 def _find_similar_from_records(
@@ -99,11 +145,11 @@ def _find_similar_from_records(
             continue
         try:
             historical_events = load_jsonl(path)
-        except Exception:
+        except (OSError, ValueError):
             continue
 
         historical = fingerprint_case(historical_events)
-        score, _ = compare_fingerprints(current, historical)
+        score, parts = compare_fingerprints(current, historical)
         if score <= 0:
             continue
 
@@ -111,6 +157,27 @@ def _find_similar_from_records(
         shared_event_ids = sorted(current.event_ids & historical.event_ids)
         shared_processes = sorted(current.processes & historical.processes)
         shared_iocs = sorted(current.iocs & historical.iocs)
+
+        matched_dimensions = sum(
+            bool(values)
+            for values in (
+                shared_techniques,
+                shared_event_ids,
+                shared_processes,
+                shared_iocs,
+            )
+        )
+        current_values = _dimension_values(current)
+        historical_values = _dimension_values(historical)
+        comparable_dimensions = sum(
+            bool(current_values[key] or historical_values[key])
+            for key in WEIGHTS
+        )
+        confidence = _confidence(
+            score,
+            matched_dimensions,
+            comparable_dimensions,
+        )
 
         explanation: list[str] = []
         if shared_techniques:
@@ -129,12 +196,19 @@ def _find_similar_from_records(
             explanation.append(
                 "Shared event IDs: " + ", ".join(shared_event_ids[:8])
             )
+        explanation.append(
+            f"Evidence confidence: {confidence} "
+            f"({matched_dimensions}/{comparable_dimensions} comparable dimensions overlap)"
+        )
 
         matches.append(
             SimilarCase(
                 case_id=case.case_id,
                 title=case.title or case.case_id,
                 score=score,
+                confidence=confidence,
+                matched_dimensions=matched_dimensions,
+                comparable_dimensions=comparable_dimensions,
                 shared_techniques=shared_techniques,
                 shared_event_ids=shared_event_ids,
                 shared_processes=shared_processes,
@@ -143,7 +217,15 @@ def _find_similar_from_records(
             )
         )
 
-    return sorted(matches, key=lambda item: (-item.score, item.case_id))[:max(1, limit)]
+    return sorted(
+        matches,
+        key=lambda item: (
+            {"high": 0, "moderate": 1, "limited": 2}[item.confidence],
+            -item.score,
+            -item.matched_dimensions,
+            item.case_id,
+        ),
+    )[:max(1, limit)]
 
 
 def find_similar_cases(
@@ -176,6 +258,27 @@ def find_similar_cases_pg(
     )
 
 
+def _similarity_payload(matches: list[SimilarCase]) -> dict:
+    return {
+        "matches": [asdict(item) for item in matches],
+        "summary": {
+            "matches": len(matches),
+            "highest_score": matches[0].score if matches else 0.0,
+            "high_confidence_matches": sum(
+                1 for item in matches if item.confidence == "high"
+            ),
+            "moderate_confidence_matches": sum(
+                1 for item in matches if item.confidence == "moderate"
+            ),
+        },
+        "interpretation": (
+            "Similarity is normalized evidence/behavior overlap across comparable "
+            "dimensions. Confidence describes evidence breadth, not attacker "
+            "attribution or probability of common origin."
+        ),
+    }
+
+
 def similarity_payload(
     events: list[Event],
     database: str | Path,
@@ -183,23 +286,14 @@ def similarity_payload(
     limit: int = 5,
     exclude_case_id: str | None = None,
 ) -> dict:
-    matches = find_similar_cases(
-        events,
-        database,
-        limit=limit,
-        exclude_case_id=exclude_case_id,
+    return _similarity_payload(
+        find_similar_cases(
+            events,
+            database,
+            limit=limit,
+            exclude_case_id=exclude_case_id,
+        )
     )
-    return {
-        "matches": [asdict(item) for item in matches],
-        "summary": {
-            "matches": len(matches),
-            "highest_score": matches[0].score if matches else 0.0,
-        },
-        "interpretation": (
-            "Similarity is evidence/behavior overlap, not attribution and not proof "
-            "that cases share the same attacker."
-        ),
-    }
 
 
 def similarity_payload_pg(
@@ -209,23 +303,14 @@ def similarity_payload_pg(
     limit: int = 5,
     exclude_case_id: str | None = None,
 ) -> dict:
-    matches = find_similar_cases_pg(
-        events,
-        dsn,
-        limit=limit,
-        exclude_case_id=exclude_case_id,
+    return _similarity_payload(
+        find_similar_cases_pg(
+            events,
+            dsn,
+            limit=limit,
+            exclude_case_id=exclude_case_id,
+        )
     )
-    return {
-        "matches": [asdict(item) for item in matches],
-        "summary": {
-            "matches": len(matches),
-            "highest_score": matches[0].score if matches else 0.0,
-        },
-        "interpretation": (
-            "Similarity is evidence/behavior overlap, not attribution and not proof "
-            "that cases share the same attacker."
-        ),
-    }
 
 
 def render_similarity(
@@ -252,7 +337,10 @@ def render_similarity(
         return "\n".join(lines)
 
     for item in payload["matches"]:
-        lines.append(f"{item['case_id']} | {item['score']}% | {item['title']}")
+        lines.append(
+            f"{item['case_id']} | {item['score']}% | "
+            f"confidence={item['confidence']} | {item['title']}"
+        )
         for reason in item["explanation"]:
             lines.append(f"  - {reason}")
     return "\n".join(lines)
