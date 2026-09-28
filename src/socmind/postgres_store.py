@@ -33,7 +33,7 @@ def postgres_health(dsn: str) -> dict:
             cur.execute(
                 "SELECT COUNT(*) FROM information_schema.tables "
                 "WHERE table_schema='public' "
-                "AND table_name IN ('cases','case_notes','case_audit')"
+                "AND table_name IN ('cases','case_notes','case_audit','case_quality')"
             )
             tables = int(cur.fetchone()[0])
     return {
@@ -41,5 +41,5 @@ def postgres_health(dsn: str) -> dict:
         "user": user,
         "version": version,
         "socmind_tables": tables,
-        "ready": tables == 3,
+        "ready": tables == 4,
     }
