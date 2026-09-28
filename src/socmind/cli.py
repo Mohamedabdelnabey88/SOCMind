@@ -97,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="SOCMind 1.5.0")
+    parser.add_argument("--version", action="version", version="SOCMind 1.6.0")
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show task-oriented SOCMind help")
@@ -251,6 +251,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     command_view = sub.add_parser("command-center", help="Show SOC queue, SLA and workload metrics")
     command_view.add_argument("database")
+    command_view.add_argument("--query")
+    command_view.add_argument("--priority")
+    command_view.add_argument("--state")
+    command_view.add_argument("--owner")
+    command_view.add_argument("--limit", type=int, default=50)
+    command_view.add_argument("--offset", type=int, default=0)
     command_view.add_argument("--json", action="store_true")
 
     command_ack = sub.add_parser("command-ack", help="Acknowledge a case and start MTTA tracking")
@@ -685,7 +691,15 @@ def main() -> None:
         return
 
     if args.command == "command-center":
-        snapshot = command_center_snapshot(args.database)
+        snapshot = command_center_snapshot(
+            args.database,
+            query=args.query,
+            priority=args.priority,
+            state=args.state,
+            owner=args.owner,
+            limit=args.limit,
+            offset=args.offset,
+        )
         if args.json:
             print(json.dumps(snapshot, indent=2))
         else:
@@ -699,7 +713,11 @@ def main() -> None:
                 f"mtta={summary['mtta_minutes'] if summary['mtta_minutes'] is not None else '-'}m "
                 f"mttr={summary['mttr_minutes'] if summary['mttr_minutes'] is not None else '-'}m"
             )
-            print("\nQueue:")
+            page = snapshot["pagination"]
+            print(
+                f"\nQueue: showing {page['returned']} of {page['matched']} "
+                f"(offset={page['offset']}, limit={page['limit']})"
+            )
             for item in snapshot["queue"]:
                 sla = item["sla"]
                 sla_text = "closed" if sla is None else (
