@@ -1,9 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from socmind.models import Event
-
 from socmind.io import load_jsonl
+from socmind.models import Event
 from socmind.production_ops import (
     AlertRecord,
     alert_from_event,
@@ -162,21 +161,36 @@ def test_default_correlation_requires_more_than_host_and_user():
 def test_evidence_collector_excludes_unrelated_context():
     ts = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
     alert = AlertRecord(
-        "E-1", "wazuh", ts, "Credential alert", 12, "WS-01",
-        user="analyst", src_ip="198.51.100.22",
+        "E-1",
+        "wazuh",
+        ts,
+        "Credential alert",
+        12,
+        "WS-01",
+        user="analyst",
+        src_ip="198.51.100.22",
     )
     related = Event(
         timestamp=ts + timedelta(minutes=1),
-        source="windows", event_id="4624", host="WS-01", user="analyst",
+        source="windows",
+        event_id="4624",
+        host="WS-01",
+        user="analyst",
     )
     unrelated = Event(
         timestamp=ts + timedelta(minutes=1),
-        source="windows", event_id="4624", host="WS-99",
-        user="other-user", src_ip="203.0.113.200",
+        source="windows",
+        event_id="4624",
+        host="WS-99",
+        user="other-user",
+        src_ip="203.0.113.200",
     )
     outside = Event(
         timestamp=ts + timedelta(hours=1),
-        source="windows", event_id="1", host="WS-01", user="analyst",
+        source="windows",
+        event_id="1",
+        host="WS-01",
+        user="analyst",
     )
     window = collect_evidence_window(alert, [related, unrelated, outside])
     assert window.events == [related]
@@ -184,8 +198,57 @@ def test_evidence_collector_excludes_unrelated_context():
 
 def test_same_host_rule_and_technique_do_not_auto_merge_without_context_anchor():
     ts = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
-    first = AlertRecord("NOISY-1","elastic",ts,"Shared server detection",10,"SHARED-SERVER",technique="T1059.001",rule_id="POWERSHELL-RULE")
-    second = AlertRecord("NOISY-2","elastic",ts + timedelta(minutes=2),"Shared server detection",10,"SHARED-SERVER",technique="T1059.001",rule_id="POWERSHELL-RULE")
+    first = AlertRecord(
+        "NOISY-1",
+        "elastic",
+        ts,
+        "Shared server detection",
+        10,
+        "SHARED-SERVER",
+        technique="T1059.001",
+        rule_id="POWERSHELL-RULE",
+    )
+    second = AlertRecord(
+        "NOISY-2",
+        "elastic",
+        ts + timedelta(minutes=2),
+        "Shared server detection",
+        10,
+        "SHARED-SERVER",
+        technique="T1059.001",
+        rule_id="POWERSHELL-RULE",
+    )
     result = correlate_alerts(first, second)
     assert result.score == 55
     assert result.related is False
+
+
+def test_cross_host_alerts_can_correlate_when_multiple_context_anchors_agree():
+    ts = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+    first = AlertRecord(
+        "LATERAL-1",
+        "elastic",
+        ts,
+        "Potential lateral movement",
+        10,
+        "WS-01",
+        user="analyst",
+        process="powershell.exe",
+        src_ip="198.51.100.50",
+        technique="T1021",
+    )
+    second = AlertRecord(
+        "LATERAL-2",
+        "elastic",
+        ts + timedelta(minutes=4),
+        "Potential lateral movement",
+        10,
+        "WS-02",
+        user="analyst",
+        process="powershell.exe",
+        src_ip="198.51.100.50",
+        technique="T1021",
+    )
+    result = correlate_alerts(first, second)
+    assert result.score >= 55
+    assert result.related is True
