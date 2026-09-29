@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .case_workflow import ALLOWED, CLOSED_STATES, PAUSED_STATES, CaseState
+from .case_workflow import ALLOWED, CLOSED_STATES, PAUSED_STATES, CaseState, state_history_from_audit
 from .sla import evaluate_sla
 
 
@@ -373,10 +373,7 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 (case_id,),
             ).fetchall()
         ]
-        state_history = [
-            item for item in audit
-            if item.get("action") == "state-transition"
-        ]
+        state_history = state_history_from_audit(audit)
         alerts = [
             dict(row)
             for row in conn.execute(
