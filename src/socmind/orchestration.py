@@ -6,13 +6,13 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .case_workflow import new_case
-from .command_center import connect, upsert_case
-from .enterprise_command_center import _connect, upsert_case_pg
+from .command_center import connect
+from .enterprise_command_center import _connect
 from .models import Event
 from .postgres_store import initialize_postgres
 from .production_ops import (
     AlertRecord,
+    CorrelationReason,
     CorrelationResult,
     alert_fingerprint,
     alert_priority,
@@ -103,10 +103,15 @@ def _stronger_priority(left: str, right: str) -> str:
 
 def _row_to_alert(row) -> AlertRecord:
     ts = row["timestamp"]
-    if isinstance(ts, str):
-        timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    else:
-        timestamp = ts
+    timestamp = (
+        datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if isinstance(ts, str)
+        else ts
+    )
+
+    def value(key: str):
+        return row.get(key) if hasattr(row, "get") else row[key]
+
     return AlertRecord(
         alert_id=row["alert_id"],
         source=row["source"],
@@ -114,21 +119,32 @@ def _row_to_alert(row) -> AlertRecord:
         title=row["title"],
         severity=int(row["severity"]),
         host=row["host"],
-        user=row.get("user") if hasattr(row, "get") else row["user"],
-        process=row.get("process") if hasattr(row, "get") else row["process"],
-        src_ip=row.get("src_ip") if hasattr(row, "get") else row["src_ip"],
-        dst_ip=row.get("dst_ip") if hasattr(row, "get") else row["dst_ip"],
-        technique=row.get("technique") if hasattr(row, "get") else row["technique"],
-        rule_id=row.get("rule_id") if hasattr(row, "get") else row["rule_id"],
-        raw_reference=row.get("raw_reference") if hasattr(row, "get") else row["raw_reference"],
+        user=value("user"),
+        process=value("process"),
+        src_ip=value("src_ip"),
+        dst_ip=value("dst_ip"),
+        technique=value("technique"),
+        rule_id=value("rule_id"),
+        raw_reference=value("raw_reference"),
     )
 
 
-def _best_match(alert: AlertRecord, candidates: list[tuple[str, AlertRecord]]) -> tuple[str | None, CorrelationResult]:
+def _best_match(
+    alert: AlertRecord,
+    candidates: list[tuple[str, AlertRecord]],
+    *,
+    window_minutes: int,
+    threshold: int,
+) -> tuple[str | None, CorrelationResult]:
     best_case: str | None = None
     best = CorrelationResult(False, 0, [])
     for case_id, existing in candidates:
-        result = correlate_alerts(alert, existing)
+        result = correlate_alerts(
+            alert,
+            existing,
+            window_minutes=window_minutes,
+            threshold=threshold,
+        )
         if result.score > best.score:
             best_case = case_id
             best = result
@@ -137,17 +153,61 @@ def _best_match(alert: AlertRecord, candidates: list[tuple[str, AlertRecord]]) -
     return best_case, best
 
 
-def _sqlite_duplicate(db_path: str | Path, alert_id: str) -> str | None:
+def _root_result() -> CorrelationResult:
+    return CorrelationResult(
+        True,
+        100,
+        [CorrelationReason("root-alert", 100, "Root alert created this case")],
+    )
+
+
+def _new_case_result() -> CorrelationResult:
+    return CorrelationResult(
+        False,
+        0,
+        [CorrelationReason(
+            "new-case",
+            0,
+            "No active case met the configured correlation threshold",
+        )],
+    )
+
+
+def _sqlite_decide_and_store(
+    db_path: str | Path,
+    alert: AlertRecord,
+    *,
+    window_minutes: int,
+    threshold: int,
+) -> tuple[str, bool, bool, str, CorrelationResult]:
+    priority = alert_priority(alert.severity)
+    now = datetime.now(timezone.utc).isoformat()
+
     with connect(db_path) as conn:
-        row = conn.execute(
+        conn.execute("BEGIN IMMEDIATE")
+
+        duplicate = conn.execute(
             "SELECT case_id FROM case_alerts WHERE alert_id=? LIMIT 1",
-            (alert_id,),
+            (alert.alert_id,),
         ).fetchone()
-        return row["case_id"] if row else None
+        if duplicate:
+            conn.commit()
+            return (
+                duplicate["case_id"],
+                False,
+                True,
+                priority,
+                CorrelationResult(
+                    True,
+                    100,
+                    [CorrelationReason(
+                        "duplicate-alert-id",
+                        100,
+                        f"Alert {alert.alert_id} was already ingested",
+                    )],
+                ),
+            )
 
-
-def _sqlite_candidates(db_path: str | Path) -> list[tuple[str, AlertRecord]]:
-    with connect(db_path) as conn:
         rows = conn.execute(
             """
             SELECT ca.case_id, a.*
@@ -159,24 +219,42 @@ def _sqlite_candidates(db_path: str | Path) -> list[tuple[str, AlertRecord]]:
             LIMIT 500
             """
         ).fetchall()
-        return [(row["case_id"], _row_to_alert(row)) for row in rows]
+        candidates = [
+            (row["case_id"], _row_to_alert(row))
+            for row in rows
+        ]
+        case_id, correlation = _best_match(
+            alert,
+            candidates,
+            window_minutes=window_minutes,
+            threshold=threshold,
+        )
+        created = case_id is None
+        if created:
+            case_id = case_id_for_alert(alert)
+            conn.execute(
+                """
+                INSERT INTO cases(
+                  case_id,state,priority,owner,opened_at,updated_at,
+                  source,title,acknowledged_at,evidence_path
+                ) VALUES(?,?,?,?,?,?,?,?,NULL,NULL)
+                ON CONFLICT(case_id) DO NOTHING
+                """,
+                (
+                    case_id,
+                    "new",
+                    priority,
+                    None,
+                    now,
+                    now,
+                    alert.source,
+                    alert.title,
+                ),
+            )
 
-
-def _sqlite_store_alert(
-    db_path: str | Path,
-    alert: AlertRecord,
-    *,
-    case_id: str,
-    result: CorrelationResult,
-    priority: str,
-) -> None:
-    now = datetime.now(timezone.utc).isoformat()
-    reasons = [asdict(item) for item in result.reasons]
-    with connect(db_path) as conn:
-        conn.execute("BEGIN IMMEDIATE")
         conn.execute(
             """
-            INSERT OR IGNORE INTO alerts(
+            INSERT INTO alerts(
               alert_id,source,timestamp,title,severity,priority,host,user,process,
               src_ip,dst_ip,technique,rule_id,fingerprint,raw_reference,created_at
             ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -200,14 +278,23 @@ def _sqlite_store_alert(
                 now,
             ),
         )
+
+        link_result = _root_result() if created else correlation
         conn.execute(
             """
-            INSERT OR IGNORE INTO case_alerts(
+            INSERT INTO case_alerts(
               case_id,alert_id,correlation_score,correlation_reasons,linked_at
             ) VALUES(?,?,?,?,?)
             """,
-            (case_id, alert.alert_id, result.score, json.dumps(reasons), now),
+            (
+                case_id,
+                alert.alert_id,
+                link_result.score,
+                json.dumps([asdict(item) for item in link_result.reasons]),
+                now,
+            ),
         )
+
         row = conn.execute(
             "SELECT priority FROM cases WHERE case_id=?",
             (case_id,),
@@ -218,6 +305,8 @@ def _sqlite_store_alert(
                 "UPDATE cases SET priority=?,updated_at=? WHERE case_id=?",
                 (upgraded, now, case_id),
             )
+            priority = upgraded
+
         conn.execute(
             """
             INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
@@ -231,8 +320,15 @@ def _sqlite_store_alert(
                     {
                         "alert_id": alert.alert_id,
                         "source": alert.source,
-                        "score": result.score,
-                        "reasons": reasons,
+                        "created_case": created,
+                        "correlation_score": (
+                            0 if created else correlation.score
+                        ),
+                        "correlation_reasons": (
+                            [asdict(item) for item in _new_case_result().reasons]
+                            if created
+                            else [asdict(item) for item in correlation.reasons]
+                        ),
                     },
                     ensure_ascii=False,
                 )[:5000],
@@ -241,88 +337,56 @@ def _sqlite_store_alert(
         )
         conn.commit()
 
-
-def orchestrate_alert_sqlite(
-    db_path: str | Path,
-    alert: AlertRecord,
-    events: list[Event],
-    *,
-    evidence_dir: str | Path,
-) -> OrchestrationResult:
-    duplicate_case = _sqlite_duplicate(db_path, alert.alert_id)
-    priority = alert_priority(alert.severity)
-    if duplicate_case:
-        path = Path(evidence_dir) / f"{duplicate_case}.jsonl"
-        count = len(_load_existing_evidence(path))
-        return OrchestrationResult(
-            duplicate_case,
-            False,
-            True,
-            priority,
-            100,
-            [{"key": "duplicate-alert-id", "weight": 100, "detail": alert.alert_id}],
-            count,
-            str(path.resolve()),
-        )
-
-    case_id, correlation = _best_match(alert, _sqlite_candidates(db_path))
-    created = case_id is None
-    if created:
-        case_id = case_id_for_alert(alert)
-
-    evidence_path = Path(evidence_dir) / f"{case_id}.jsonl"
-    window = collect_evidence_window(alert, events)
-    evidence_count = _merge_evidence(evidence_path, window.events)
-
-    if created:
-        upsert_case(
-            db_path,
-            new_case(case_id, priority=priority),
-            source=alert.source,
-            title=alert.title,
-            evidence_path=evidence_path,
-        )
-    else:
-        with connect(db_path) as conn:
-            conn.execute(
-                "UPDATE cases SET evidence_path=? WHERE case_id=?",
-                (str(evidence_path.resolve()), case_id),
-            )
-            conn.commit()
-
-    _sqlite_store_alert(
-        db_path,
-        alert,
-        case_id=case_id,
-        result=correlation,
-        priority=priority,
-    )
-    return OrchestrationResult(
+    return (
         case_id,
         created,
         False,
         priority,
-        correlation.score,
-        [asdict(item) for item in correlation.reasons],
-        evidence_count,
-        str(evidence_path.resolve()),
+        _new_case_result() if created else correlation,
     )
 
 
-def _pg_duplicate(dsn: str, alert_id: str) -> str | None:
+def _pg_decide_and_store(
+    dsn: str,
+    alert: AlertRecord,
+    *,
+    window_minutes: int,
+    threshold: int,
+) -> tuple[str, bool, bool, str, CorrelationResult]:
+    initialize_postgres(dsn)
+    priority = alert_priority(alert.severity)
+    now = datetime.now(timezone.utc)
+
     with _connect(dsn) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT case_id FROM case_alerts WHERE alert_id=%s LIMIT 1",
-                (alert_id,),
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                ("socmind-alert-orchestration",),
             )
-            row = cur.fetchone()
-            return row["case_id"] if row else None
 
+            cur.execute(
+                "SELECT case_id FROM case_alerts WHERE alert_id=%s LIMIT 1",
+                (alert.alert_id,),
+            )
+            duplicate = cur.fetchone()
+            if duplicate:
+                conn.commit()
+                return (
+                    duplicate["case_id"],
+                    False,
+                    True,
+                    priority,
+                    CorrelationResult(
+                        True,
+                        100,
+                        [CorrelationReason(
+                            "duplicate-alert-id",
+                            100,
+                            f"Alert {alert.alert_id} was already ingested",
+                        )],
+                    ),
+                )
 
-def _pg_candidates(dsn: str) -> list[tuple[str, AlertRecord]]:
-    with _connect(dsn) as conn:
-        with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT ca.case_id, a.*
@@ -334,29 +398,45 @@ def _pg_candidates(dsn: str) -> list[tuple[str, AlertRecord]]:
                 LIMIT 500
                 """
             )
-            rows = cur.fetchall()
-    return [(row["case_id"], _row_to_alert(row)) for row in rows]
+            candidates = [
+                (row["case_id"], _row_to_alert(row))
+                for row in cur.fetchall()
+            ]
+            case_id, correlation = _best_match(
+                alert,
+                candidates,
+                window_minutes=window_minutes,
+                threshold=threshold,
+            )
+            created = case_id is None
+            if created:
+                case_id = case_id_for_alert(alert)
+                cur.execute(
+                    """
+                    INSERT INTO cases(
+                      case_id,state,priority,owner,opened_at,updated_at,
+                      source,title,acknowledged_at,evidence_path
+                    ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NULL,NULL)
+                    ON CONFLICT(case_id) DO NOTHING
+                    """,
+                    (
+                        case_id,
+                        "new",
+                        priority,
+                        None,
+                        now,
+                        now,
+                        alert.source,
+                        alert.title,
+                    ),
+                )
 
-
-def _pg_store_alert(
-    dsn: str,
-    alert: AlertRecord,
-    *,
-    case_id: str,
-    result: CorrelationResult,
-    priority: str,
-) -> None:
-    now = datetime.now(timezone.utc)
-    reasons = [asdict(item) for item in result.reasons]
-    with _connect(dsn) as conn:
-        with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO alerts(
                   alert_id,source,timestamp,title,severity,priority,host,"user",process,
                   src_ip,dst_ip,technique,rule_id,fingerprint,raw_reference,created_at
                 ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT(alert_id) DO NOTHING
                 """,
                 (
                     alert.alert_id,
@@ -377,15 +457,23 @@ def _pg_store_alert(
                     now,
                 ),
             )
+
+            link_result = _root_result() if created else correlation
             cur.execute(
                 """
                 INSERT INTO case_alerts(
                   case_id,alert_id,correlation_score,correlation_reasons,linked_at
                 ) VALUES(%s,%s,%s,%s::jsonb,%s)
-                ON CONFLICT(case_id,alert_id) DO NOTHING
                 """,
-                (case_id, alert.alert_id, result.score, json.dumps(reasons), now),
+                (
+                    case_id,
+                    alert.alert_id,
+                    link_result.score,
+                    json.dumps([asdict(item) for item in link_result.reasons]),
+                    now,
+                ),
             )
+
             cur.execute(
                 "SELECT priority FROM cases WHERE case_id=%s FOR UPDATE",
                 (case_id,),
@@ -397,6 +485,8 @@ def _pg_store_alert(
                     "UPDATE cases SET priority=%s,updated_at=%s WHERE case_id=%s",
                     (upgraded, now, case_id),
                 )
+                priority = upgraded
+
             cur.execute(
                 """
                 INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
@@ -410,8 +500,15 @@ def _pg_store_alert(
                         {
                             "alert_id": alert.alert_id,
                             "source": alert.source,
-                            "score": result.score,
-                            "reasons": reasons,
+                            "created_case": created,
+                            "correlation_score": (
+                                0 if created else correlation.score
+                            ),
+                            "correlation_reasons": (
+                                [asdict(item) for item in _new_case_result().reasons]
+                                if created
+                                else [asdict(item) for item in correlation.reasons]
+                            ),
                         },
                         ensure_ascii=False,
                     )[:5000],
@@ -420,6 +517,64 @@ def _pg_store_alert(
             )
         conn.commit()
 
+    return (
+        case_id,
+        created,
+        False,
+        priority,
+        _new_case_result() if created else correlation,
+    )
+
+
+def orchestrate_alert_sqlite(
+    db_path: str | Path,
+    alert: AlertRecord,
+    events: list[Event],
+    *,
+    evidence_dir: str | Path,
+    correlation_window_minutes: int = 15,
+    correlation_threshold: int = 55,
+    evidence_before_minutes: int = 15,
+    evidence_after_minutes: int = 15,
+) -> OrchestrationResult:
+    case_id, created, duplicate, priority, correlation = (
+        _sqlite_decide_and_store(
+            db_path,
+            alert,
+            window_minutes=correlation_window_minutes,
+            threshold=correlation_threshold,
+        )
+    )
+
+    evidence_path = Path(evidence_dir) / f"{case_id}.jsonl"
+    if duplicate:
+        count = len(_load_existing_evidence(evidence_path))
+    else:
+        window = collect_evidence_window(
+            alert,
+            events,
+            before_minutes=evidence_before_minutes,
+            after_minutes=evidence_after_minutes,
+        )
+        count = _merge_evidence(evidence_path, window.events)
+        with connect(db_path) as conn:
+            conn.execute(
+                "UPDATE cases SET evidence_path=? WHERE case_id=?",
+                (str(evidence_path.resolve()), case_id),
+            )
+            conn.commit()
+
+    return OrchestrationResult(
+        case_id,
+        created,
+        duplicate,
+        priority,
+        correlation.score,
+        [asdict(item) for item in correlation.reasons],
+        count,
+        str(evidence_path.resolve()),
+    )
+
 
 def orchestrate_alert_postgres(
     dsn: str,
@@ -427,42 +582,31 @@ def orchestrate_alert_postgres(
     events: list[Event],
     *,
     evidence_dir: str | Path,
+    correlation_window_minutes: int = 15,
+    correlation_threshold: int = 55,
+    evidence_before_minutes: int = 15,
+    evidence_after_minutes: int = 15,
 ) -> OrchestrationResult:
-    initialize_postgres(dsn)
-    duplicate_case = _pg_duplicate(dsn, alert.alert_id)
-    priority = alert_priority(alert.severity)
-    if duplicate_case:
-        path = Path(evidence_dir) / f"{duplicate_case}.jsonl"
-        count = len(_load_existing_evidence(path))
-        return OrchestrationResult(
-            duplicate_case,
-            False,
-            True,
-            priority,
-            100,
-            [{"key": "duplicate-alert-id", "weight": 100, "detail": alert.alert_id}],
-            count,
-            str(path.resolve()),
+    case_id, created, duplicate, priority, correlation = (
+        _pg_decide_and_store(
+            dsn,
+            alert,
+            window_minutes=correlation_window_minutes,
+            threshold=correlation_threshold,
         )
-
-    case_id, correlation = _best_match(alert, _pg_candidates(dsn))
-    created = case_id is None
-    if created:
-        case_id = case_id_for_alert(alert)
+    )
 
     evidence_path = Path(evidence_dir) / f"{case_id}.jsonl"
-    window = collect_evidence_window(alert, events)
-    evidence_count = _merge_evidence(evidence_path, window.events)
-
-    if created:
-        upsert_case_pg(
-            dsn,
-            new_case(case_id, priority=priority),
-            source=alert.source,
-            title=alert.title,
-            evidence_path=str(evidence_path.resolve()),
-        )
+    if duplicate:
+        count = len(_load_existing_evidence(evidence_path))
     else:
+        window = collect_evidence_window(
+            alert,
+            events,
+            before_minutes=evidence_before_minutes,
+            after_minutes=evidence_after_minutes,
+        )
+        count = _merge_evidence(evidence_path, window.events)
         with _connect(dsn) as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -471,20 +615,13 @@ def orchestrate_alert_postgres(
                 )
             conn.commit()
 
-    _pg_store_alert(
-        dsn,
-        alert,
-        case_id=case_id,
-        result=correlation,
-        priority=priority,
-    )
     return OrchestrationResult(
         case_id,
         created,
-        False,
+        duplicate,
         priority,
         correlation.score,
         [asdict(item) for item in correlation.reasons],
-        evidence_count,
+        count,
         str(evidence_path.resolve()),
     )
