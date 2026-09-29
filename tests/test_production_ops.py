@@ -1,7 +1,8 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from socmind.io import load_jsonl
+from socmind.models import Event
 from socmind.production_ops import (
     AlertRecord,
     alert_from_event,
@@ -129,3 +130,68 @@ def test_wazuh_mitre_metadata_is_promoted():
     assert alert.alert_id == "wazuh-001"
     assert alert.technique == "T1110"
     assert alert.severity == 12
+
+
+def test_default_correlation_requires_more_than_host_and_user():
+    ts = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+    left = AlertRecord(
+        "A-1", "elastic", ts, "one", 10, "WS-01",
+        user="analyst", rule_id="R-1",
+    )
+    right = AlertRecord(
+        "A-2", "elastic", ts + timedelta(minutes=2), "two", 10, "WS-01",
+        user="analyst", rule_id="R-2",
+    )
+    result = correlate_alerts(left, right)
+    assert result.score == 50
+    assert result.related is False
+
+    stronger = AlertRecord(
+        "A-3", "elastic", ts + timedelta(minutes=3), "three", 10, "WS-01",
+        user="analyst", process="powershell.exe", rule_id="R-3",
+    )
+    left_with_process = AlertRecord(
+        "A-4", "elastic", ts, "four", 10, "WS-01",
+        user="analyst", process="powershell.exe", rule_id="R-4",
+    )
+    strong_result = correlate_alerts(left_with_process, stronger)
+    assert strong_result.score >= 65
+    assert strong_result.related is True
+
+
+def test_evidence_collector_excludes_unrelated_context():
+    ts = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+    alert = AlertRecord(
+        "E-1",
+        "wazuh",
+        ts,
+        "Credential alert",
+        12,
+        "WS-01",
+        user="analyst",
+        src_ip="198.51.100.22",
+    )
+    related = Event(
+        timestamp=ts + timedelta(minutes=1),
+        source="windows",
+        event_id="4624",
+        host="WS-01",
+        user="analyst",
+    )
+    unrelated = Event(
+        timestamp=ts + timedelta(minutes=1),
+        source="windows",
+        event_id="4624",
+        host="WS-99",
+        user="other-user",
+        src_ip="203.0.113.200",
+    )
+    outside = Event(
+        timestamp=ts + timedelta(hours=1),
+        source="windows",
+        event_id="1",
+        host="WS-01",
+        user="analyst",
+    )
+    window = collect_evidence_window(alert, [related, unrelated, outside])
+    assert window.events == [related]
