@@ -145,6 +145,20 @@ socmind alert-live wazuh-indexer https://wazuh-indexer:9200 \
 
 Both live and file ingestion use the same deterministic orchestration engine.
 
+### Milestone 3 — Evidence Requirements
+
+SOCMind can turn investigation validation gaps into explicit requirements such as IdP/MFA context, VPN history, parent-process ancestry, host scope, and change-control evidence.
+
+```text
+required → requested → received
+          ↘ unavailable → requested / received / waived
+required ─────────────────────────────→ waived
+```
+
+Missing evidence is tracked as an operational dependency; it is not treated as contradicting evidence. Received requirements require an evidence reference, while unavailable/waived states require a documented reason. Requirement operations are permission-controlled and audited in both SQLite and PostgreSQL.
+
+Case state transitions also expose structured history with actor, timestamp and transition reason.
+
 Detailed guide: [Production SOC Operations](docs/production-soc-operations.md)
 
 ## v1.5 Enterprise Foundation
