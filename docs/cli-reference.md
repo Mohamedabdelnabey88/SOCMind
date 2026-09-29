@@ -98,6 +98,18 @@ tune
 lead-health
 ```
 
+## Production SOC operations
+
+```text
+alert-orchestrate
+```
+
+Workflow help:
+
+```bash
+socmind help production-ops
+```
+
 ## Enterprise operations
 
 ```text
