@@ -299,3 +299,49 @@ The query always filters by the case alert time window and, when available, requ
 - `destination.ip`
 
 This is evidence collection for investigation context. It is not an attribution engine and does not automatically determine case disposition.
+
+## Evidence integrity
+
+Every case evidence JSONL package written by alert orchestration or the live evidence collector now receives a sidecar manifest:
+
+```text
+<case-id>.jsonl.manifest.json
+```
+
+The manifest records:
+
+- manifest format version
+- case ID
+- evidence file name
+- SHA-256 digest
+- file size in bytes
+- collected timestamp
+- source/provider
+- event count
+
+Manifest generation happens while the per-case evidence lock is still held, so concurrent writers cannot silently leave a stale digest/event count after a completed merge.
+
+Verify a package with:
+
+```bash
+socmind evidence-verify socmind-evidence/INC-2026-001.jsonl
+```
+
+JSON output:
+
+```bash
+socmind evidence-verify socmind-evidence/INC-2026-001.jsonl --json
+```
+
+A mismatch in SHA-256, size, event count, file name, or manifest version returns an invalid result and the CLI exits non-zero.
+
+Case detail also exposes integrity state through:
+
+```text
+GET /api/cases/{case_id}
+GET /api/cases/{case_id}/evidence-integrity
+```
+
+The web Case Workspace surfaces the same state as `VALID`, `INVALID`, manifest missing, or unavailable.
+
+This provides tamper detection for the stored evidence package. It does **not** provide cryptographic signing, trusted timestamping, immutable/WORM storage, or proof of custody outside SOCMind; those require separate controls.
