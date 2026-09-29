@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — v1.6 Native OIDC / SSO
+
+- add generic OpenID Connect Authorization Code flow with PKCE S256
+- discover authorization/token/JWKS endpoints from the configured issuer
+- verify ID-token signature, issuer, audience, expiry, nonce and authorized-party semantics
+- map a configurable claim (for example groups/roles) to SOCMind RBAC roles
+- issue HMAC-signed HttpOnly SOCMind sessions with bounded lifetime and issuer binding
+- add native login/callback/logout routes while preserving local-token and trusted-proxy modes
+- require HTTPS by default; permit HTTP only for explicit loopback development
+- read OIDC client/session secrets from environment variables rather than repository config
+- add cryptographic RSA JWT tests and end-to-end FastAPI OIDC session tests
+- provider-specific live validation remains deployment-dependent and is not claimed by CI
+
 ## Unreleased — v1.6 Detection Rule Lifecycle
 
 - add governed rule states: experimental / testing / approved / production / deprecated / retired

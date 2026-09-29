@@ -231,6 +231,22 @@ socmind web events.jsonl \
 
 Identity is mapped to RBAC roles and mutating actions use the authenticated subject as the audit actor. Trusted-proxy signatures include a short-lived timestamp; the authenticating proxy must strip client-supplied `X-SOCMind-*` identity headers and generate fresh signed headers itself.
 
+### Native OIDC / SSO
+
+SOCMind can authenticate analysts directly through a generic OpenID Connect provider using Authorization Code + PKCE S256 while preserving the existing local-token and trusted-proxy modes.
+
+```bash
+export SOCMIND_OIDC_ISSUER='https://idp.example.com'
+export SOCMIND_OIDC_CLIENT_ID='socmind-client'
+export SOCMIND_OIDC_REDIRECT_URI='https://socmind.example.com/auth/callback'
+export SOCMIND_OIDC_SESSION_SECRET='replace-with-a-long-random-secret'
+export SOCMIND_OIDC_ROLE_MAP='{"SOC-T1":"analyst","SOC-T2":"senior-analyst","SOC-Leads":"lead","SOC-Admins":"admin"}'
+
+socmind web events.jsonl --auth-mode oidc --host 0.0.0.0
+```
+
+OIDC client secrets, when required by the provider, are read from `SOCMIND_OIDC_CLIENT_SECRET` and are not stored in the repository. Provider-specific live interoperability still depends on the deployment tenant/configuration.
+
 ### Tamper-evident audit
 
 ```bash

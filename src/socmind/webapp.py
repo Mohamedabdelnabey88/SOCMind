@@ -1,3 +1,5 @@
+import secrets
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +18,18 @@ from .dashboard import build_dashboard_payload
 from .detection_replay import detection_replay_payload
 from .detections import load_rules
 from .enterprise_auth import AuthConfig, authenticate
+from .oidc_auth import (
+    OIDCConfig,
+    build_authorization_url,
+    decode_signed_payload,
+    exchange_code,
+    fetch_discovery,
+    new_authorization_transaction,
+    parse_role_map,
+    session_from_claims,
+    validate_oidc_config,
+    verify_id_token,
+)
 from .evidence_integrity import evidence_manifest_path, verification_payload, verify_evidence_manifest
 from .evidence_requests import (
     create_requirement_pg,
@@ -59,12 +73,22 @@ def create_app(
     auth_mode: str = "local-token",
     api_token_role: str = "admin",
     trusted_proxy_secret: str | None = None,
+    oidc_issuer: str | None = None,
+    oidc_client_id: str | None = None,
+    oidc_client_secret: str | None = None,
+    oidc_redirect_uri: str | None = None,
+    oidc_session_secret: str | None = None,
+    oidc_role_claim: str = "groups",
+    oidc_role_map: dict[str, str] | str | None = None,
+    oidc_default_role: str = "viewer",
+    oidc_scopes: str = "openid profile email",
+    oidc_allow_insecure_http: bool = False,
     enterprise_audit_path: str | Path | None = None,
     postgres_dsn: str | None = None,
 ):
     try:
         from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
-        from fastapi.responses import FileResponse
+        from fastapi.responses import FileResponse, RedirectResponse
         from fastapi.staticfiles import StaticFiles
     except ImportError as exc:
         raise RuntimeError(
@@ -100,11 +124,41 @@ def create_app(
         Path(enterprise_audit_path).resolve() if enterprise_audit_path else None
     )
     app.state.postgres_dsn = postgres_dsn
+    app.state.oidc_config = None
+    if auth_mode.strip().lower() == "oidc":
+        app.state.oidc_config = validate_oidc_config(OIDCConfig(
+            issuer=str(oidc_issuer or ""),
+            client_id=str(oidc_client_id or ""),
+            client_secret=oidc_client_secret,
+            redirect_uri=str(oidc_redirect_uri or ""),
+            session_secret=str(oidc_session_secret or ""),
+            role_claim=str(oidc_role_claim or "groups"),
+            role_map=parse_role_map(oidc_role_map),
+            default_role=str(oidc_default_role or "viewer"),
+            scopes=str(oidc_scopes or "openid profile email"),
+            allow_insecure_http=bool(oidc_allow_insecure_http),
+        ))
+
     app.state.auth_config = AuthConfig(
         mode=auth_mode,
         api_token=api_token,
         api_token_role=api_token_role,
         trusted_proxy_secret=trusted_proxy_secret,
+        oidc_session_secret=(
+            app.state.oidc_config.session_secret
+            if app.state.oidc_config is not None
+            else None
+        ),
+        oidc_session_cookie=(
+            app.state.oidc_config.session_cookie
+            if app.state.oidc_config is not None
+            else "socmind_oidc_session"
+        ),
+        oidc_issuer=(
+            app.state.oidc_config.issuer
+            if app.state.oidc_config is not None
+            else None
+        ),
     )
 
     @app.middleware("http")
@@ -349,6 +403,110 @@ def create_app(
             action=action,
             detail=detail,
         )
+
+    @app.get("/auth/login")
+    def oidc_login(return_to: str = Query(default="/", max_length=500)):
+        config = app.state.oidc_config
+        if config is None:
+            raise HTTPException(status_code=404, detail="OIDC authentication is not enabled")
+        try:
+            discovery = fetch_discovery(config)
+            transaction_cookie, challenge = new_authorization_transaction(
+                config,
+                return_to=return_to,
+            )
+            target = build_authorization_url(
+                config,
+                discovery,
+                transaction_cookie,
+                challenge,
+            )
+        except (OSError, ValueError, PermissionError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        response = RedirectResponse(target, status_code=302)
+        response.set_cookie(
+            config.transaction_cookie,
+            transaction_cookie,
+            max_age=600,
+            httponly=True,
+            secure=not config.allow_insecure_http,
+            samesite="lax",
+            path="/auth",
+        )
+        return response
+
+    @app.get("/auth/callback")
+    def oidc_callback(
+        request: Request,
+        code: str | None = Query(default=None, max_length=4096),
+        state: str | None = Query(default=None, max_length=512),
+        error: str | None = Query(default=None, max_length=256),
+        error_description: str | None = Query(default=None, max_length=1000),
+    ):
+        config = app.state.oidc_config
+        if config is None:
+            raise HTTPException(status_code=404, detail="OIDC authentication is not enabled")
+        if error:
+            raise HTTPException(
+                status_code=401,
+                detail=f"OIDC authorization failed: {error}: {error_description or ''}".strip(),
+            )
+        if not code or not state:
+            raise HTTPException(status_code=400, detail="OIDC callback is missing code or state")
+        transaction_cookie = request.cookies.get(config.transaction_cookie)
+        if not transaction_cookie:
+            raise HTTPException(status_code=400, detail="OIDC transaction cookie is missing")
+        try:
+            transaction = decode_signed_payload(
+                transaction_cookie,
+                config.session_secret,
+            )
+            if not secrets.compare_digest(
+                str(transaction.get("state") or ""),
+                str(state),
+            ):
+                raise PermissionError("OIDC state validation failed")
+            discovery = fetch_discovery(config)
+            tokens = exchange_code(
+                config,
+                discovery,
+                code=code,
+                verifier=str(transaction["verifier"]),
+            )
+            claims = verify_id_token(
+                config,
+                discovery,
+                str(tokens["id_token"]),
+                nonce=str(transaction["nonce"]),
+            )
+            session_cookie, session = session_from_claims(config, claims)
+        except (OSError, ValueError, PermissionError, RuntimeError, KeyError) as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+        target = str(transaction.get("return_to") or "/")
+        if not target.startswith("/"):
+            target = "/"
+        response = RedirectResponse(target, status_code=303)
+        response.delete_cookie(config.transaction_cookie, path="/auth")
+        response.set_cookie(
+            config.session_cookie,
+            session_cookie,
+            max_age=max(60, int(session["exp"]) - int(time.time())),
+            httponly=True,
+            secure=not config.allow_insecure_http,
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @app.post("/auth/logout")
+    def oidc_logout():
+        config = app.state.oidc_config
+        response = RedirectResponse("/", status_code=303)
+        if config is not None:
+            response.delete_cookie(config.session_cookie, path="/")
+            response.delete_cookie(config.transaction_cookie, path="/auth")
+        return response
 
     @app.get("/health")
     def health():
@@ -810,7 +968,13 @@ def create_app(
         }
 
     @app.get("/")
-    def index():
+    def index(request: Request):
+        if app.state.auth_config.mode.strip().lower() == "oidc":
+            try:
+                headers = {key.lower(): value for key, value in request.headers.items()}
+                authenticate(headers, app.state.auth_config)
+            except (PermissionError, ValueError):
+                return RedirectResponse("/auth/login?return_to=/", status_code=302)
         return FileResponse(assets / "index.html")
 
     app.mount("/assets", StaticFiles(directory=assets), name="assets")
