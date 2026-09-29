@@ -4,7 +4,7 @@ from pathlib import Path
 
 from socmind.command_center import case_detail
 from socmind.io import load_jsonl
-from socmind.orchestration import orchestrate_alert_sqlite
+from socmind.orchestration import _correlation_lock_keys, orchestrate_alert_sqlite
 from socmind.production_ops import AlertRecord
 
 
@@ -151,3 +151,24 @@ def test_concurrent_correlated_alerts_collapse_into_one_sqlite_case(tmp_path):
     assert sum(1 for item in results if item.created) == 1
     detail = case_detail(db, results[0].case_id)
     assert len(detail["alerts"]) == 2
+
+
+def test_postgres_lock_keys_are_deterministic_and_identity_scoped():
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+    base = events[0]
+    alert = AlertRecord(
+        "LOCK-1",
+        "elastic",
+        base.timestamp,
+        "Lock test",
+        8,
+        base.host,
+        user=base.user,
+        src_ip=base.src_ip,
+        dst_ip=base.dst_ip,
+    )
+    keys = _correlation_lock_keys(alert)
+    assert keys == sorted(keys)
+    assert any(key.startswith("host:") for key in keys)
+    if base.user:
+        assert any(key.startswith("user:") for key in keys)
