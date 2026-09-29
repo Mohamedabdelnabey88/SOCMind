@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from socmind.case_workflow import new_case
 from socmind.enterprise_auth import trusted_proxy_headers
 from socmind.enterprise_command_center import (
+    _connect,
     add_case_note_pg,
     assign_case_pg,
     case_detail_pg,
@@ -236,3 +237,104 @@ def test_concurrent_postgres_alerts_collapse_into_one_case(tmp_path):
     assert sum(1 for item in results if item.created) == 1
     detail = case_detail_pg(DSN, results[0].case_id)
     assert len(detail["alerts"]) == 2
+
+
+def test_postgres_alert_flood_keeps_relevant_case_discoverable(tmp_path):
+    reset_database()
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+    base = events[0]
+    evidence_dir = tmp_path / "evidence"
+
+    root = AlertRecord(
+        "PG-ROOT-RELEVANT",
+        "elastic",
+        base.timestamp,
+        "Relevant root alert",
+        8,
+        "TARGET-PG-HOST",
+        user="target-pg-user",
+        src_ip="198.51.100.77",
+        rule_id="PG-ROOT-RULE",
+    )
+    root_result = orchestrate_alert_postgres(
+        DSN,
+        root,
+        events,
+        evidence_dir=evidence_dir,
+    )
+
+    with _connect(DSN) as conn:
+        with conn.cursor() as cur:
+            for idx in range(650):
+                case_id = f"PG-NOISE-CASE-{idx:04d}"
+                alert_id = f"PG-NOISE-ALERT-{idx:04d}"
+                stamp = base.timestamp + timedelta(seconds=idx + 1)
+                cur.execute(
+                    """
+                    INSERT INTO cases(
+                      case_id,state,priority,owner,opened_at,updated_at,
+                      source,title,acknowledged_at,evidence_path
+                    ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NULL,NULL)
+                    """,
+                    (
+                        case_id, "new", "P3", None, stamp, stamp,
+                        "elastic", "Noise alert",
+                    ),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO alerts(
+                      alert_id,source,timestamp,title,severity,priority,host,"user",process,
+                      src_ip,dst_ip,technique,rule_id,fingerprint,raw_reference,created_at
+                    ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        alert_id,
+                        "elastic",
+                        stamp,
+                        "Noise alert",
+                        3,
+                        "P3",
+                        f"PG-NOISE-HOST-{idx}",
+                        f"pg-noise-user-{idx}",
+                        None,
+                        f"203.0.113.{(idx % 200) + 1}",
+                        None,
+                        None,
+                        f"PG-NOISE-RULE-{idx}",
+                        f"pg-noise-fingerprint-{idx}",
+                        None,
+                        stamp,
+                    ),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO case_alerts(
+                      case_id,alert_id,correlation_score,correlation_reasons,linked_at
+                    ) VALUES(%s,%s,%s,%s::jsonb,%s)
+                    """,
+                    (case_id, alert_id, 100, "[]", stamp),
+                )
+        conn.commit()
+
+    follow_up = AlertRecord(
+        "PG-FOLLOW-UP-RELEVANT",
+        "elastic",
+        base.timestamp + timedelta(minutes=12),
+        "Relevant follow-up",
+        13,
+        "TARGET-PG-HOST",
+        user="target-pg-user",
+        src_ip="198.51.100.77",
+        rule_id="PG-FOLLOW-RULE",
+    )
+    result = orchestrate_alert_postgres(
+        DSN,
+        follow_up,
+        events,
+        evidence_dir=evidence_dir,
+    )
+
+    assert result.created is False
+    assert result.case_id == root_result.case_id
+    assert result.correlation_score >= 55
