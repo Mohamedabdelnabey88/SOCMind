@@ -8,6 +8,7 @@ from .command_center import (
     assign_case,
     case_detail,
     command_center_snapshot,
+    record_case_activity,
     transition_case,
 )
 from .contradiction import contradiction_payload
@@ -31,6 +32,7 @@ from .enterprise_command_center import (
     assign_case_pg,
     case_detail_pg,
     command_center_snapshot_pg,
+    record_case_activity_pg,
     transition_case_pg,
 )
 from .io import load_jsonl
@@ -40,96 +42,9 @@ from .rbac import Principal, require_permission
 from .replay import replay_payload
 from .similarity import similarity_payload, similarity_payload_pg
 from .whatif import compare_rule_packs
+from .unified_timeline import build_unified_case_timeline
 
 
-
-def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
-    items: list[dict] = []
-    case = detail.get("case") or {}
-    opened_at = case.get("opened_at")
-    if opened_at:
-        items.append({
-            "timestamp": opened_at,
-            "kind": "case",
-            "title": "Case opened",
-            "detail": f"{case.get('priority', 'P3')} · {case.get('source') or 'unknown source'}",
-        })
-
-    for alert in detail.get("alerts") or []:
-        items.append({
-            "timestamp": alert.get("timestamp"),
-            "kind": "alert",
-            "title": alert.get("title") or alert.get("alert_id") or "Alert",
-            "detail": (
-                f"{alert.get('source') or 'unknown'} · severity {alert.get('severity', '—')} · "
-                f"correlation {alert.get('correlation_score', 0)}"
-            ),
-        })
-
-    for collection in detail.get("evidence_collections") or []:
-        items.append({
-            "timestamp": collection.get("completed_at") or collection.get("started_at"),
-            "kind": "evidence-collection",
-            "title": (
-                f"Evidence collection · {collection.get('provider') or 'unknown'} · "
-                f"{collection.get('status') or 'unknown'}"
-            ),
-            "detail": (
-                f"{collection.get('source_ref') or 'unknown source'} · "
-                f"{collection.get('event_count', 0)} event(s)"
-            ),
-        })
-
-    for note in detail.get("notes") or []:
-        items.append({
-            "timestamp": note.get("created_at"),
-            "kind": "analyst-note",
-            "title": f"Analyst note · {note.get('author') or 'unknown'}",
-            "detail": note.get("text") or "",
-        })
-
-    for audit in detail.get("audit") or []:
-        items.append({
-            "timestamp": audit.get("timestamp"),
-            "kind": "case-action",
-            "title": audit.get("action") or "Case action",
-            "detail": f"{audit.get('actor') or 'unknown'} · {audit.get('detail') or ''}",
-        })
-
-    if investigation and not investigation.get("error"):
-        for event in investigation.get("timeline") or []:
-            items.append({
-                "timestamp": event.get("timestamp"),
-                "kind": "evidence",
-                "title": (
-                    f"{event.get('host') or 'unknown'} · "
-                    f"{event.get('source') or 'unknown'} · "
-                    f"{event.get('event_id') or 'event'}"
-                ),
-                "detail": (
-                    event.get("command_line")
-                    or event.get("process")
-                    or event.get("dst_ip")
-                    or event.get("src_ip")
-                    or event.get("user")
-                    or ""
-                ),
-            })
-
-    def sort_key(item: dict):
-        value = item.get("timestamp")
-        if not value:
-            return datetime.min
-        try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-            if parsed.tzinfo is not None:
-                return parsed.replace(tzinfo=None)
-            return parsed
-        except ValueError:
-            return datetime.min
-
-    items.sort(key=sort_key)
-    return items
 
 def create_app(
     events_path: str | Path,
@@ -337,6 +252,24 @@ def create_app(
             disposition=disposition,
         )
 
+    def store_activity(case_id: str, activity: str, actor: str, detail: str):
+        kind, target = require_store()
+        if kind == "postgres":
+            return record_case_activity_pg(
+                target,
+                case_id,
+                activity=activity,
+                actor=actor,
+                detail=detail,
+            )
+        return record_case_activity(
+            target,
+            case_id,
+            activity=activity,
+            actor=actor,
+            detail=detail,
+        )
+
     def case_events_for_requirements(case_id: str):
         detail = store_detail(case_id)
         evidence_value = (detail.get("case") or {}).get("evidence_path")
@@ -497,7 +430,7 @@ def create_app(
             **detail,
             "investigation": investigation,
             "evidence_integrity": evidence_integrity_for_detail(detail),
-            "case_timeline": _case_timeline(detail, investigation),
+            "case_timeline": build_unified_case_timeline(detail, investigation),
         }
 
     @app.get("/api/cases/{target_case_id}/evidence-integrity")
@@ -609,6 +542,41 @@ def create_app(
                 detail=f"{requirement_id} -> {target_status}",
             )
             return store_detail(case_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/cases/{target_case_id}/activities")
+    def case_activity_endpoint(
+        target_case_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(principal),
+    ):
+        activity = str(request.get("type", "")).strip().lower()
+        permission = (
+            "detection.review"
+            if activity == "detection-feedback"
+            else "case.transition"
+        )
+        try:
+            require_permission(user, permission)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+        try:
+            detail = str(request.get("detail", "")).strip()
+            store_activity(
+                target_case_id,
+                activity,
+                user.subject,
+                detail,
+            )
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action=f"case.activity.{activity}",
+                detail=detail,
+            )
+            return store_detail(target_case_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
