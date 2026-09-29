@@ -74,7 +74,7 @@ async function loadCommandCenter(){
     const metrics=[["Active Cases",s.active],["P1 Active",s.p1_active],["SLA Breaches",s.sla_breached],["Unassigned",s.unassigned],["MTTA",s.mtta_minutes==null?"—":s.mtta_minutes+"m"],["MTTR",s.mttr_minutes==null?"—":s.mttr_minutes+"m"]];
     q("#commandCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
     q("#caseQueue").innerHTML=commandPayload.queue.map(item=>{
-      let sla="Closed";if(item.sla)sla=item.sla.paused?'<span class="chip">PAUSED · '+esc(item.sla.remaining_minutes+"m")+'</span>':item.sla.breached?'<span class="sla-breach">BREACHED</span>':esc(item.sla.remaining_minutes+"m");
+      let sla="Closed";if(item.sla)sla=item.sla.breached?(item.sla.paused?'<span class="sla-breach">BREACHED · PAUSED</span>':'<span class="sla-breach">BREACHED</span>'):item.sla.paused?'<span class="chip">PAUSED · '+esc(item.sla.remaining_minutes+"m")+'</span>':esc(item.sla.remaining_minutes+"m");
       return '<tr class="case-row" data-case="'+esc(item.case_id)+'"><td><strong>'+esc(item.case_id)+'</strong><br><span>'+esc(item.title||"")+'</span></td><td><span class="priority '+esc(item.priority.toLowerCase())+'">'+esc(item.priority)+'</span></td><td>'+esc(item.state)+'</td><td>'+esc(item.owner||"Unassigned")+'</td><td>'+sla+'</td></tr>';
     }).join("")||'<tr><td colspan="5">No matching cases.</td></tr>';
     qa(".case-row").forEach(row=>row.addEventListener("click",()=>openCase(row.dataset.case)));
