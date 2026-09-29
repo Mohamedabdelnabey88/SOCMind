@@ -82,6 +82,22 @@ CREATE TABLE IF NOT EXISTS case_alerts (
     FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE,
     FOREIGN KEY(alert_id) REFERENCES alerts(alert_id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS evidence_collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id TEXT NOT NULL UNIQUE,
+    case_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    source_ref TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    query_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    event_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+);
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority,state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
 CREATE INDEX IF NOT EXISTS idx_notes_case ON case_notes(case_id,created_at);
@@ -89,6 +105,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_case ON case_audit(case_id,timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_host_user ON alerts(host,user);
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_collections_case ON evidence_collections(case_id,started_at);
 """
 
 
@@ -300,7 +317,29 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 item["correlation_reasons"] = json.loads(item["correlation_reasons"])
             except (TypeError, json.JSONDecodeError):
                 item["correlation_reasons"] = []
-    return {"case": case, "notes": notes, "audit": audit, "alerts": alerts}
+        collections = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT * FROM evidence_collections
+                WHERE case_id=?
+                ORDER BY started_at DESC
+                """,
+                (case_id,),
+            ).fetchall()
+        ]
+        for item in collections:
+            try:
+                item["query"] = json.loads(item.pop("query_json"))
+            except (TypeError, json.JSONDecodeError):
+                item["query"] = {}
+    return {
+        "case": case,
+        "notes": notes,
+        "audit": audit,
+        "alerts": alerts,
+        "evidence_collections": collections,
+    }
 
 
 def list_cases(
