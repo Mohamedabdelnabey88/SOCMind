@@ -13,6 +13,7 @@ from socmind.oidc_auth import (
     OIDCConfig,
     decode_signed_payload,
     encode_signed_payload,
+    exchange_code,
     map_claims_to_role,
     new_authorization_transaction,
     session_from_claims,
@@ -74,6 +75,45 @@ def test_authorization_transaction_rejects_protocol_relative_return_path():
     )
     transaction = decode_signed_payload(cookie, SECRET, now=1_900_000_001)
     assert transaction["return_to"] == "/"
+
+    cookie, _ = new_authorization_transaction(
+        config,
+        return_to="/\\evil.example",
+        now=1_900_000_000,
+    )
+    assert decode_signed_payload(cookie, SECRET, now=1_900_000_001)["return_to"] == "/"
+
+
+def test_token_exchange_prefers_client_secret_basic(monkeypatch):
+    captured = {}
+
+    def fake_request(url, *, method="GET", data=None, extra_headers=None, timeout=10.0):
+        captured.update({
+            "url": url,
+            "method": method,
+            "data": data,
+            "headers": extra_headers or {},
+        })
+        return {"id_token": "token"}
+
+    monkeypatch.setattr(oidc, "_json_request", fake_request)
+    config = _config(client_secret="super-secret")
+    payload = exchange_code(
+        config,
+        {
+            "token_endpoint": "https://idp.example.test/token",
+            "token_endpoint_auth_methods_supported": [
+                "client_secret_basic",
+                "client_secret_post",
+            ],
+        },
+        code="abc",
+        verifier="verifier",
+    )
+    assert payload["id_token"] == "token"
+    assert captured["method"] == "POST"
+    assert captured["headers"]["Authorization"].startswith("Basic ")
+    assert "client_secret" not in captured["data"]
 
 
 def test_oidc_session_rejects_different_issuer():
