@@ -9,7 +9,7 @@ from .adapters import (
     parse_auditd,
     parse_auth_log,
     parse_elastic_ndjson,
-    elastic_search_hits_to_events,
+    parse_elastic_hits,
     parse_evtx,
     parse_journald_json,
     parse_wazuh_alerts,
@@ -18,7 +18,7 @@ from .adapters import (
 )
 from .case import export_case
 from .audit import append_audit
-from .case_workflow import assign, load_case, new_case, save_case, transition
+from .case_workflow import VALID_STATES, assign, load_case, new_case, save_case, transition
 from .coverage import build_coverage, detection_gaps, render_coverage
 from .contradiction import contradiction_payload, render_contradictions
 from .command_center import (
@@ -47,6 +47,8 @@ from .hypothesis import generate_hypotheses
 from .integrations import ElasticClient, WazuhClient, integration_check
 from .io import load_jsonl
 from .lead_metrics import lead_snapshot
+from .live_evidence import collect_case_evidence_postgres, collect_case_evidence_sqlite, collection_payload
+from .evidence_integrity import verification_payload, verify_evidence_manifest
 from .quality_gate import load_checklist, quality_payload, render_quality_review
 from .ioc import extract_iocs
 from .notes import append_note
@@ -60,6 +62,19 @@ from .rbac import ROLE_PERMISSIONS
 from .replay import replay_payload, render_replay
 from .report import render_text
 from .rule_tests import run_rule_test
+from .rule_lifecycle import (
+    RULE_LIFECYCLE_STATUSES,
+    record_coverage_delta,
+    record_false_positive_observation,
+    record_incident_replay,
+    register_rule,
+    rule_lifecycle_detail,
+    rule_lifecycle_list,
+    test_registered_rule,
+    transition_rule,
+    update_rule_version,
+    validate_registered_rule_syntax,
+)
 from .similarity import render_similarity, similarity_payload
 from .sla import evaluate_sla
 from .shift_brief import render_shift_brief
@@ -168,6 +183,117 @@ def build_parser() -> argparse.ArgumentParser:
     rule_test_cmd.add_argument("rule")
     rule_test_cmd.add_argument("fixture")
 
+    rule_register_cmd = sub.add_parser(
+        "rule-register",
+        help="Register a detection rule in the governed lifecycle registry",
+    )
+    rule_register_cmd.add_argument("registry")
+    rule_register_cmd.add_argument("rule")
+    rule_register_cmd.add_argument("--owner", required=True)
+    rule_register_cmd.add_argument("--actor", required=True)
+    rule_register_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_register_cmd.add_argument("--version", default="1.0.0")
+    rule_register_cmd.add_argument("--note", default="Initial lifecycle registration")
+    rule_register_cmd.add_argument("--json", action="store_true")
+
+    rule_syntax_cmd = sub.add_parser(
+        "rule-syntax",
+        help="Run and record syntax validation for a registered detection rule",
+    )
+    rule_syntax_cmd.add_argument("registry")
+    rule_syntax_cmd.add_argument("rule_id")
+    rule_syntax_cmd.add_argument("--actor", required=True)
+    rule_syntax_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_syntax_cmd.add_argument("--json", action="store_true")
+
+    rule_lifecycle_test_cmd = sub.add_parser(
+        "rule-lifecycle-test",
+        help="Run a regression fixture and persist the lifecycle test result",
+    )
+    rule_lifecycle_test_cmd.add_argument("registry")
+    rule_lifecycle_test_cmd.add_argument("rule_id")
+    rule_lifecycle_test_cmd.add_argument("fixture")
+    rule_lifecycle_test_cmd.add_argument("--actor", required=True)
+    rule_lifecycle_test_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_lifecycle_test_cmd.add_argument("--json", action="store_true")
+
+    rule_replay_cmd = sub.add_parser(
+        "rule-replay-record",
+        help="Replay a registered rule against confirmed incident evidence and record the result",
+    )
+    rule_replay_cmd.add_argument("registry")
+    rule_replay_cmd.add_argument("rule_id")
+    rule_replay_cmd.add_argument("events")
+    rule_replay_cmd.add_argument("--case-id")
+    rule_replay_cmd.add_argument("--actor", required=True)
+    rule_replay_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_replay_cmd.add_argument("--json", action="store_true")
+
+    rule_fp_cmd = sub.add_parser(
+        "rule-fp-record",
+        help="Record a false-positive observation for a registered rule",
+    )
+    rule_fp_cmd.add_argument("registry")
+    rule_fp_cmd.add_argument("rule_id")
+    rule_fp_cmd.add_argument("--sample-size", type=int, required=True)
+    rule_fp_cmd.add_argument("--false-positives", type=int, required=True)
+    rule_fp_cmd.add_argument("--note", required=True)
+    rule_fp_cmd.add_argument("--actor", required=True)
+    rule_fp_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_fp_cmd.add_argument("--json", action="store_true")
+
+    rule_coverage_cmd = sub.add_parser(
+        "rule-coverage-record",
+        help="Record coverage delta evidence before lifecycle approval",
+    )
+    rule_coverage_cmd.add_argument("registry")
+    rule_coverage_cmd.add_argument("rule_id")
+    rule_coverage_cmd.add_argument("--visibility-delta", type=float, required=True)
+    rule_coverage_cmd.add_argument("--new-technique", action="append", default=[])
+    rule_coverage_cmd.add_argument("--note", default="")
+    rule_coverage_cmd.add_argument("--actor", required=True)
+    rule_coverage_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_coverage_cmd.add_argument("--json", action="store_true")
+
+    rule_version_cmd = sub.add_parser(
+        "rule-version",
+        help="Change a registered rule version with an auditable change note",
+    )
+    rule_version_cmd.add_argument("registry")
+    rule_version_cmd.add_argument("rule_id")
+    rule_version_cmd.add_argument("--version", required=True)
+    rule_version_cmd.add_argument("--note", required=True)
+    rule_version_cmd.add_argument("--actor", required=True)
+    rule_version_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_version_cmd.add_argument("--json", action="store_true")
+
+    rule_transition_cmd = sub.add_parser(
+        "rule-transition",
+        help="Move a registered rule through the governed lifecycle",
+    )
+    rule_transition_cmd.add_argument("registry")
+    rule_transition_cmd.add_argument("rule_id")
+    rule_transition_cmd.add_argument("--state", choices=RULE_LIFECYCLE_STATUSES, required=True)
+    rule_transition_cmd.add_argument("--note", required=True)
+    rule_transition_cmd.add_argument("--actor", required=True)
+    rule_transition_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_transition_cmd.add_argument("--json", action="store_true")
+
+    rule_show_cmd = sub.add_parser(
+        "rule-show",
+        help="Show lifecycle metadata for one registered detection rule",
+    )
+    rule_show_cmd.add_argument("registry")
+    rule_show_cmd.add_argument("rule_id")
+    rule_show_cmd.add_argument("--json", action="store_true")
+
+    rule_list_cmd = sub.add_parser(
+        "rule-list",
+        help="List registered detection-rule lifecycle records",
+    )
+    rule_list_cmd.add_argument("registry")
+    rule_list_cmd.add_argument("--json", action="store_true")
+
     tune_cmd = sub.add_parser("tune", help="Suggest conservative false-positive tuning")
     tune_cmd.add_argument("dispositions")
     tune_cmd.add_argument("--min-samples", type=int, default=5)
@@ -201,7 +327,15 @@ def build_parser() -> argparse.ArgumentParser:
     web_cmd.add_argument("--proposed-rules", help="Optional proposed rule pack for IRE what-if comparison")
     web_cmd.add_argument("--quality-checklist", help="Optional analyst checklist JSON for IRE quality gate")
     web_cmd.add_argument("--api-token", help="Optional API token; prefer SOCMIND_API_TOKEN environment variable")
-    web_cmd.add_argument("--auth-mode", choices=["local-token", "trusted-proxy"], default="local-token")
+    web_cmd.add_argument("--auth-mode", choices=["local-token", "trusted-proxy", "oidc"], default="local-token")
+    web_cmd.add_argument("--oidc-issuer", help="OIDC issuer; prefer SOCMIND_OIDC_ISSUER")
+    web_cmd.add_argument("--oidc-client-id", help="OIDC client ID; prefer SOCMIND_OIDC_CLIENT_ID")
+    web_cmd.add_argument("--oidc-redirect-uri", help="Exact OIDC callback URI; prefer SOCMIND_OIDC_REDIRECT_URI")
+    web_cmd.add_argument("--oidc-role-claim", default=None, help="Claim containing groups/roles; default groups")
+    web_cmd.add_argument("--oidc-role-map", help="JSON claim-value to SOCMind-role map; prefer SOCMIND_OIDC_ROLE_MAP")
+    web_cmd.add_argument("--oidc-default-role", choices=sorted(ROLE_PERMISSIONS), default=None)
+    web_cmd.add_argument("--oidc-scopes", default=None, help="OIDC scopes; must include openid")
+    web_cmd.add_argument("--oidc-allow-insecure-http", action="store_true", help="Allow loopback HTTP only for local OIDC development")
     web_cmd.add_argument("--api-token-role", choices=sorted(ROLE_PERMISSIONS), default="admin")
     web_cmd.add_argument("--enterprise-audit", help="Optional tamper-evident enterprise audit JSONL path")
     web_cmd.add_argument("--allow-unsafe-remote", action="store_true", help="Explicitly allow non-loopback bind without token (isolated lab only)")
@@ -217,15 +351,22 @@ def build_parser() -> argparse.ArgumentParser:
     case_assign.add_argument("--owner", required=True)
 
     case_move = sub.add_parser("case-transition", help="Move a case through the SOC lifecycle")
-    case_move.add_argument("--reason")
     case_move.add_argument("case_file")
-    case_move.add_argument("--state", required=True)
+    case_move.add_argument("--state", choices=VALID_STATES, required=True)
 
     sla_cmd = sub.add_parser("sla", help="Evaluate the case response SLA")
     sla_cmd.add_argument("case_file")
 
     evidence_cmd = sub.add_parser("evidence", help="Fingerprint evidence with SHA-256")
     evidence_cmd.add_argument("path")
+
+    evidence_verify = sub.add_parser(
+        "evidence-verify",
+        help="Verify a SOCMind evidence package against its SHA-256 integrity manifest",
+    )
+    evidence_verify.add_argument("path", help="Evidence JSONL file")
+    evidence_verify.add_argument("--manifest", help="Optional manifest path; defaults to <evidence>.manifest.json")
+    evidence_verify.add_argument("--json", action="store_true")
 
     handoff_cmd = sub.add_parser("handoff", help="Create a shift handoff summary")
     handoff_cmd.add_argument("events")
@@ -270,9 +411,9 @@ def build_parser() -> argparse.ArgumentParser:
     command_transition = sub.add_parser("command-transition", help="Transition a registered case")
     command_transition.add_argument("database")
     command_transition.add_argument("case_id")
-    command_transition.add_argument("--state", required=True)
+    command_transition.add_argument("--state", choices=VALID_STATES, required=True)
     command_transition.add_argument("--actor", default="cli-analyst")
-    command_transition.add_argument("--reason")
+    command_transition.add_argument("--reason", help="Operational reason/context for the state change")
 
     command_note = sub.add_parser("command-note", help="Add a note to a registered case")
     command_note.add_argument("database")
@@ -338,14 +479,19 @@ def build_parser() -> argparse.ArgumentParser:
     security_cmd.add_argument("--command-db")
     security_cmd.add_argument("--json", action="store_true")
 
-    for verb in ("evidence-register", "evidence-verify"):
-        artifact_cmd = sub.add_parser(verb, help="Register or verify immutable evidence artifacts")
+    for verb in ("artifact-register", "artifact-verify"):
+        artifact_cmd = sub.add_parser(verb, help="Register or verify immutable evidence snapshots")
         artifact_cmd.add_argument("case_id")
         artifact_cmd.add_argument("--database", default="socmind.db")
         artifact_cmd.add_argument("--postgres-dsn")
-        artifact_cmd.add_argument("--evidence-dir", required=True)
+        storage = artifact_cmd.add_mutually_exclusive_group(required=True)
+        storage.add_argument("--evidence-dir")
+        storage.add_argument("--bucket")
+        artifact_cmd.add_argument("--endpoint")
+        artifact_cmd.add_argument("--prefix", default="socmind-evidence/")
+        artifact_cmd.add_argument("--storage-id", default="local")
         artifact_cmd.add_argument("--actor", default="cli-analyst")
-        if verb == "evidence-register":
+        if verb == "artifact-register":
             artifact_cmd.add_argument("path")
             artifact_cmd.add_argument("--source", required=True)
 
@@ -447,26 +593,43 @@ def build_parser() -> argparse.ArgumentParser:
     alert_ops.add_argument("--evidence-after", type=int, default=15)
     alert_ops.add_argument("--json", action="store_true")
 
-    live_ops = sub.add_parser(
+    live_alerts = sub.add_parser(
         "alert-live",
         help="Pull live Elastic/Wazuh Indexer alerts and orchestrate them into SOC cases",
     )
-    live_ops.add_argument("provider", choices=["elastic", "wazuh-indexer"])
-    live_ops.add_argument("url")
-    live_ops.add_argument("index")
-    live_store = live_ops.add_mutually_exclusive_group(required=True)
+    live_alerts.add_argument("provider", choices=["elastic", "wazuh-indexer"])
+    live_alerts.add_argument("base_url")
+    live_alerts.add_argument("index")
+    live_store = live_alerts.add_mutually_exclusive_group(required=True)
     live_store.add_argument("--database", help="SQLite command-center database")
-    live_store.add_argument("--postgres-dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN")
-    live_ops.add_argument("--size", type=int, default=100)
-    live_ops.add_argument("--query-file")
-    live_ops.add_argument("--evidence", help="Optional normalized evidence JSONL; defaults to pulled alert events")
-    live_ops.add_argument("--evidence-dir", default="socmind-evidence")
-    live_ops.add_argument("--correlation-window", type=int, default=15)
-    live_ops.add_argument("--correlation-threshold", type=int, default=55)
-    live_ops.add_argument("--evidence-before", type=int, default=15)
-    live_ops.add_argument("--evidence-after", type=int, default=15)
-    live_ops.add_argument("--insecure", action="store_true")
-    live_ops.add_argument("--json", action="store_true")
+    live_store.add_argument("--postgres-dsn", help="PostgreSQL DSN; defaults to SOCMIND_POSTGRES_DSN")
+    live_alerts.add_argument("--size", type=int, default=100)
+    live_alerts.add_argument("--query-file")
+    live_alerts.add_argument("--evidence", help="Optional normalized evidence JSONL; defaults to pulled alert events")
+    live_alerts.add_argument("--evidence-dir", default="socmind-evidence")
+    live_alerts.add_argument("--correlation-window", type=int, default=15)
+    live_alerts.add_argument("--correlation-threshold", type=int, default=55)
+    live_alerts.add_argument("--evidence-before", type=int, default=15)
+    live_alerts.add_argument("--evidence-after", type=int, default=15)
+    live_alerts.add_argument("--insecure", action="store_true", help="Disable TLS verification for controlled lab use only")
+    live_alerts.add_argument("--json", action="store_true")
+
+    live_evidence = sub.add_parser(
+        "case-collect-evidence",
+        help="Collect live Elastic/Wazuh Indexer evidence for an orchestrated case",
+    )
+    live_evidence.add_argument("case_id")
+    live_evidence.add_argument("provider", choices=["elastic", "wazuh-indexer"])
+    live_evidence.add_argument("base_url")
+    live_evidence.add_argument("index")
+    live_evidence.add_argument("--database", help="SQLite command-center database")
+    live_evidence.add_argument("--postgres-dsn", help="PostgreSQL DSN; defaults to SOCMIND_POSTGRES_DSN")
+    live_evidence.add_argument("--evidence-dir", default="socmind-evidence")
+    live_evidence.add_argument("--before", type=int, default=15, help="Minutes before earliest linked alert")
+    live_evidence.add_argument("--after", type=int, default=15, help="Minutes after latest linked alert")
+    live_evidence.add_argument("--max-events", type=int, default=2000)
+    live_evidence.add_argument("--insecure", action="store_true", help="Disable TLS verification for controlled lab use only")
+    live_evidence.add_argument("--json", action="store_true")
 
     return parser
 
@@ -582,6 +745,172 @@ def main() -> None:
         print(f"{state} | {result.name} | expected={result.expected_matches} actual={result.actual_matches}")
         raise SystemExit(0 if result.passed else 1)
 
+    if args.command == "rule-register":
+        payload = register_rule(
+            args.registry,
+            args.rule,
+            owner=args.owner,
+            actor=args.actor,
+            role=args.role,
+            version=args.version,
+            note=args.note,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule registered -> {payload['rule_id']} | "
+                f"{payload['version']} | {payload['status']} | owner={payload['owner']}"
+            )
+        return
+
+    if args.command == "rule-syntax":
+        payload = validate_registered_rule_syntax(
+            args.registry,
+            args.rule_id,
+            actor=args.actor,
+            role=args.role,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule syntax -> {args.rule_id} | {payload['status']}"
+                + (f" | {payload['error']}" if payload.get("error") else "")
+            )
+        raise SystemExit(0 if payload["status"] == "passed" else 1)
+
+    if args.command == "rule-lifecycle-test":
+        payload = test_registered_rule(
+            args.registry,
+            args.rule_id,
+            args.fixture,
+            actor=args.actor,
+            role=args.role,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule test -> {args.rule_id} | {payload['status']} | "
+                f"expected={payload['expected_matches']} actual={payload['actual_matches']}"
+            )
+        raise SystemExit(0 if payload["status"] == "passed" else 1)
+
+    if args.command == "rule-replay-record":
+        payload = record_incident_replay(
+            args.registry,
+            args.rule_id,
+            args.events,
+            actor=args.actor,
+            role=args.role,
+            case_id=args.case_id,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule replay -> {args.rule_id} | visibility={payload['visibility_percent']}% "
+                f"| first_detection_step={payload['first_detection_step']}"
+            )
+        return
+
+    if args.command == "rule-fp-record":
+        payload = record_false_positive_observation(
+            args.registry,
+            args.rule_id,
+            actor=args.actor,
+            role=args.role,
+            sample_size=args.sample_size,
+            false_positives=args.false_positives,
+            note=args.note,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule FP observation -> {args.rule_id} | "
+                f"{payload['false_positives']}/{payload['sample_size']} "
+                f"({payload['false_positive_rate']:.2%})"
+            )
+        return
+
+    if args.command == "rule-coverage-record":
+        payload = record_coverage_delta(
+            args.registry,
+            args.rule_id,
+            actor=args.actor,
+            role=args.role,
+            visibility_delta=args.visibility_delta,
+            newly_covered_techniques=args.new_technique,
+            note=args.note,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule coverage -> {args.rule_id} | "
+                f"visibility_delta={payload['visibility_delta']} | "
+                f"new={','.join(payload['newly_covered_techniques']) or '-'}"
+            )
+        return
+
+    if args.command == "rule-version":
+        payload = update_rule_version(
+            args.registry,
+            args.rule_id,
+            version=args.version,
+            actor=args.actor,
+            role=args.role,
+            note=args.note,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"Rule version -> {payload['rule_id']} | {payload['version']}")
+        return
+
+    if args.command == "rule-transition":
+        payload = transition_rule(
+            args.registry,
+            args.rule_id,
+            args.state,
+            actor=args.actor,
+            role=args.role,
+            note=args.note,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"Rule lifecycle -> {payload['rule_id']} | {payload['status']}")
+        return
+
+    if args.command == "rule-show":
+        payload = rule_lifecycle_detail(args.registry, args.rule_id)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"{payload['rule_id']} | {payload['title']} | "
+                f"version={payload['version']} | status={payload['status']} | "
+                f"owner={payload['owner']}"
+            )
+            print(f"ATT&CK={','.join(payload['attack_mapping']) or '-'}")
+            print(f"syntax={payload['syntax_status']['status']} | test={payload['test_status']['status']}")
+        return
+
+    if args.command == "rule-list":
+        payload = rule_lifecycle_list(args.registry)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            for item in payload:
+                print(
+                    f"{item['rule_id']} | {item['version']} | "
+                    f"{item['status']} | owner={item['owner']}"
+                )
+        return
+
     if args.command == "tune":
         suggestions = suggest_tuning(load_dispositions(args.dispositions), min_samples=args.min_samples)
         if not suggestions:
@@ -646,23 +975,50 @@ def main() -> None:
 
     if args.command == "case-transition":
         case = load_case(args.case_file)
-        transition(case, args.state, reason=args.reason)
+        transition(case, args.state)
         save_case(case, args.case_file)
         print(f"Case state -> {case.case_id} | {case.state}")
         return
 
     if args.command == "sla":
         case = load_case(args.case_file)
-        status = evaluate_sla(case.opened_at, priority=case.priority)
+        status = evaluate_sla(
+            case.opened_at,
+            priority=case.priority,
+            paused_seconds=case.sla_paused_seconds,
+            paused_at=case.sla_paused_at,
+        )
         print(
             f"{case.case_id} | {status.priority} | elapsed={status.elapsed_minutes}m "
-            f"| target={status.target_minutes}m | breached={'yes' if status.breached else 'no'}"
+            f"| target={status.target_minutes}m | breached={'yes' if status.breached else 'no'} "
+            f"| paused={'yes' if status.paused else 'no'} | paused_total={status.paused_minutes}m"
         )
         return
 
     if args.command == "evidence":
         item = fingerprint(args.path)
         print(f"SHA256 {item.sha256} | bytes={item.size_bytes} | {item.path}")
+        return
+
+    if args.command == "evidence-verify":
+        try:
+            result = verify_evidence_manifest(args.path, args.manifest)
+        except (OSError, ValueError, TypeError) as exc:
+            raise SystemExit(f"Evidence verification failed: {exc}") from exc
+        payload = verification_payload(result)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            state = "VALID" if result.valid else "INVALID"
+            print(
+                f"Evidence integrity {state} | sha256={result.actual_sha256} | "
+                f"bytes={result.actual_size} | events={result.actual_event_count}"
+            )
+            if result.errors:
+                for error in result.errors:
+                    print(f"  - {error}")
+        if not result.valid:
+            raise SystemExit(1)
         return
 
     if args.command == "handoff":
@@ -714,7 +1070,13 @@ def main() -> None:
         return
 
     if args.command == "command-transition":
-        transition_case(args.database, args.case_id, args.state, actor=args.actor, reason=args.reason)
+        transition_case(
+            args.database,
+            args.case_id,
+            args.state,
+            actor=args.actor,
+            reason=args.reason,
+        )
         print(f"Case state -> {args.case_id} | {args.state}")
         return
 
@@ -904,21 +1266,24 @@ def main() -> None:
                 print(f"[{'OK' if item.ok else 'WARN'}] {item.name}: {item.detail}")
         raise SystemExit(0 if all(item.ok for item in checks) else 1)
 
-    if args.command in {"evidence-register", "evidence-verify"}:
-        from .evidence_integrity import register_artifact, verify_artifacts
-        from .evidence_storage import LocalEvidenceStore
+    if args.command in {"artifact-register", "artifact-verify"}:
+        from .evidence_artifacts import register_artifact, verify_artifacts
+        from .evidence_storage import configured_store
         from .rbac import Principal
-        store = LocalEvidenceStore(args.evidence_dir)
+        store = configured_store(directory=args.evidence_dir, bucket=args.bucket,
+                                 endpoint=args.endpoint, prefix=args.prefix)
         target = args.postgres_dsn or args.database
+        if args.postgres_dsn:
+            initialize_postgres(args.postgres_dsn)
         actor = Principal(args.actor, "admin", "local-cli")
-        if args.command == "evidence-register":
-            result = register_artifact(target, args.case_id, args.path, store, storage_id="local",
+        if args.command == "artifact-register":
+            result = register_artifact(target, args.case_id, args.path, store, storage_id=args.storage_id,
                                        source=args.source, principal=actor, postgres=bool(args.postgres_dsn))
         else:
-            result = verify_artifacts(target, args.case_id, {"local": store}, principal=actor,
+            result = verify_artifacts(target, args.case_id, {args.storage_id: store}, principal=actor,
                                       postgres=bool(args.postgres_dsn))
         print(json.dumps(result, indent=2))
-        if args.command == "evidence-verify" and any(x["integrity_status"] != "verified" for x in result):
+        if args.command == "artifact-verify" and any(x["integrity_status"] != "verified" for x in result):
             raise SystemExit(1)
         return
 
@@ -1036,18 +1401,24 @@ def main() -> None:
         if args.provider == "wazuh-indexer":
             api_key = None
             bearer_token = os.environ.get("WAZUH_INDEXER_JWT")
-            username = os.environ.get("WAZUH_INDEXER_USERNAME")
+            username = (
+                os.environ.get("WAZUH_INDEXER_USER")
+                or os.environ.get("WAZUH_INDEXER_USERNAME")
+            )
             password = os.environ.get("WAZUH_INDEXER_PASSWORD")
             sort_field = "timestamp"
         else:
             api_key = os.environ.get("ELASTIC_API_KEY")
             bearer_token = os.environ.get("ELASTIC_BEARER_TOKEN")
-            username = os.environ.get("ELASTIC_USERNAME")
+            username = (
+                os.environ.get("ELASTIC_USER")
+                or os.environ.get("ELASTIC_USERNAME")
+            )
             password = os.environ.get("ELASTIC_PASSWORD")
             sort_field = "@timestamp"
 
         client = ElasticClient(
-            args.url,
+            args.base_url,
             api_key=api_key,
             bearer_token=bearer_token,
             username=username,
@@ -1064,14 +1435,14 @@ def main() -> None:
         alert_events = (
             wazuh_search_hits_to_events(hits)
             if args.provider == "wazuh-indexer"
-            else elastic_search_hits_to_events(hits)
+            else parse_elastic_hits(hits)
         )
         evidence_events = (
             load_jsonl(args.evidence)
             if args.evidence
             else alert_events
         )
-        dsn = args.postgres_dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
+        postgres_dsn = args.postgres_dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
         results = []
         for event in alert_events:
             alert = alert_from_event(event)
@@ -1087,10 +1458,10 @@ def main() -> None:
                     evidence_after_minutes=args.evidence_after,
                 )
             else:
-                if not dsn:
+                if not postgres_dsn:
                     raise SystemExit("Set SOCMIND_POSTGRES_DSN or pass --postgres-dsn.")
                 result = orchestrate_alert_postgres(
-                    dsn,
+                    postgres_dsn,
                     alert,
                     evidence_events,
                     evidence_dir=args.evidence_dir,
@@ -1101,6 +1472,8 @@ def main() -> None:
                 )
             results.append({
                 "alert_id": alert.alert_id,
+                "title": alert.title,
+                "source": alert.source,
                 "case_id": result.case_id,
                 "created": result.created,
                 "duplicate": result.duplicate,
@@ -1221,6 +1594,80 @@ def main() -> None:
                     print(f"  - {reason['detail']}")
         return
 
+    if args.command == "case-collect-evidence":
+        if args.database and args.postgres_dsn:
+            raise SystemExit("Choose one case store: --database or --postgres-dsn.")
+        postgres_dsn = args.postgres_dsn
+        if not args.database and not postgres_dsn:
+            postgres_dsn = os.environ.get("SOCMIND_POSTGRES_DSN")
+        if not args.database and not postgres_dsn:
+            raise SystemExit("Pass --database or set/pass SOCMIND_POSTGRES_DSN.")
+
+        if args.provider == "elastic":
+            client = ElasticClient(
+                args.base_url,
+                api_key=os.environ.get("ELASTIC_API_KEY"),
+                bearer_token=os.environ.get("ELASTIC_BEARER_TOKEN"),
+                username=os.environ.get("ELASTIC_USER"),
+                password=os.environ.get("ELASTIC_PASSWORD"),
+                verify_tls=not args.insecure,
+            )
+        else:
+            user = os.environ.get("WAZUH_INDEXER_USER")
+            password = os.environ.get("WAZUH_INDEXER_PASSWORD")
+            if not user or not password:
+                raise SystemExit(
+                    "Set WAZUH_INDEXER_USER and WAZUH_INDEXER_PASSWORD."
+                )
+            client = ElasticClient(
+                args.base_url,
+                username=user,
+                password=password,
+                verify_tls=not args.insecure,
+            )
+
+        kwargs = {
+            "provider": args.provider,
+            "index": args.index,
+            "evidence_dir": args.evidence_dir,
+            "before_minutes": args.before,
+            "after_minutes": args.after,
+            "max_events": args.max_events,
+        }
+        if args.database:
+            result = collect_case_evidence_sqlite(
+                args.database,
+                args.case_id,
+                client,
+                **kwargs,
+            )
+        else:
+            result = collect_case_evidence_postgres(
+                postgres_dsn,
+                args.case_id,
+                client,
+                **kwargs,
+            )
+
+        payload = collection_payload(result)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print("SOCMind Live Evidence Collection")
+            print("===============================")
+            print(f"case={result.case_id}")
+            print(f"provider={result.provider}")
+            print(f"source={result.source_ref}")
+            print(f"status={result.status}")
+            print(f"window={result.window_start} -> {result.window_end}")
+            print(f"fetched_events={result.fetched_events}")
+            print(f"total_hits={result.total_hits if result.total_hits is not None else '-'}")
+            print(f"truncated={result.truncated}")
+            print(f"evidence_events={result.evidence_events}")
+            print(f"evidence_path={result.evidence_path}")
+            print(f"collection_id={result.collection_id}")
+        return
+
     if args.command == "enterprise-info":
         payload = {
             role: sorted(permissions)
@@ -1315,8 +1762,24 @@ def main() -> None:
         from .webapp import create_app
         api_token = args.api_token or os.environ.get("SOCMIND_API_TOKEN")
         trusted_proxy_secret = os.environ.get("SOCMIND_TRUSTED_PROXY_SECRET")
+        oidc_issuer = args.oidc_issuer or os.environ.get("SOCMIND_OIDC_ISSUER")
+        oidc_client_id = args.oidc_client_id or os.environ.get("SOCMIND_OIDC_CLIENT_ID")
+        oidc_client_secret = os.environ.get("SOCMIND_OIDC_CLIENT_SECRET")
+        oidc_redirect_uri = args.oidc_redirect_uri or os.environ.get("SOCMIND_OIDC_REDIRECT_URI")
+        oidc_session_secret = os.environ.get("SOCMIND_OIDC_SESSION_SECRET")
+        oidc_role_claim = args.oidc_role_claim or os.environ.get("SOCMIND_OIDC_ROLE_CLAIM", "groups")
+        oidc_role_map = args.oidc_role_map or os.environ.get("SOCMIND_OIDC_ROLE_MAP")
+        oidc_default_role = args.oidc_default_role or os.environ.get("SOCMIND_OIDC_DEFAULT_ROLE", "viewer")
+        oidc_scopes = args.oidc_scopes or os.environ.get("SOCMIND_OIDC_SCOPES", "openid profile email")
         auth_configured = (
-            args.auth_mode == "trusted-proxy" and bool(trusted_proxy_secret)
+            (args.auth_mode == "trusted-proxy" and bool(trusted_proxy_secret))
+            or (
+                args.auth_mode == "oidc"
+                and bool(oidc_issuer)
+                and bool(oidc_client_id)
+                and bool(oidc_redirect_uri)
+                and bool(oidc_session_secret)
+            )
         )
         try:
             validate_web_binding(
@@ -1341,6 +1804,16 @@ def main() -> None:
             auth_mode=args.auth_mode,
             api_token_role=args.api_token_role,
             trusted_proxy_secret=trusted_proxy_secret,
+            oidc_issuer=oidc_issuer,
+            oidc_client_id=oidc_client_id,
+            oidc_client_secret=oidc_client_secret,
+            oidc_redirect_uri=oidc_redirect_uri,
+            oidc_session_secret=oidc_session_secret,
+            oidc_role_claim=oidc_role_claim,
+            oidc_role_map=oidc_role_map,
+            oidc_default_role=oidc_default_role,
+            oidc_scopes=oidc_scopes,
+            oidc_allow_insecure_http=args.oidc_allow_insecure_http,
             enterprise_audit_path=args.enterprise_audit,
         )
         print(f"SOCMind Web -> http://{args.host}:{args.port}")

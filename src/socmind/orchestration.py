@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .command_center import connect
 from .enterprise_command_center import _connect
+from .evidence_integrity import write_evidence_manifest, evidence_manifest_path, verify_evidence_manifest
 from .models import Event
 from .postgres_store import initialize_postgres
 from .production_ops import (
@@ -102,9 +103,20 @@ def _load_existing_evidence(path: Path) -> list[Event]:
     return load_jsonl(path)
 
 
-def _merge_evidence(path: Path, events: list[Event]) -> int:
+def _merge_evidence(
+    path: Path,
+    events: list[Event],
+    *,
+    case_id: str | None = None,
+    source: str | None = None,
+) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if any(item.is_symlink() for item in [path, *path.parents, path.with_suffix(path.suffix + ".lock")]):
+        raise ValueError("Symlink evidence paths are not permitted")
     with _evidence_lock(path):
+        if evidence_manifest_path(path).exists():
+            if not verify_evidence_manifest(path).valid:
+                raise ValueError("Existing evidence failed integrity verification; merge refused")
         existing = _load_existing_evidence(path)
         merged: dict[tuple, Event] = {
             _event_key(event): event for event in existing
@@ -120,6 +132,13 @@ def _merge_evidence(path: Path, events: list[Event]) -> int:
             fh.flush()
             os.fsync(fh.fileno())
         temp.replace(path)
+        if case_id is not None and source is not None:
+            write_evidence_manifest(
+                path,
+                case_id=case_id,
+                source=source,
+                event_count=len(ordered),
+            )
         return len(ordered)
 
 
@@ -233,10 +252,8 @@ def _sqlite_candidate_rows(
     ):
         if value:
             anchors.append((column, value))
-
     anchor_sql = " OR ".join(
-        f"a.{column} = ? COLLATE NOCASE"
-        for column, _ in anchors
+        f"a.{column} = ? COLLATE NOCASE" for column, _ in anchors
     )
     params = [start, end, *[value for _, value in anchors]]
     return conn.execute(
@@ -274,10 +291,8 @@ def _pg_candidate_rows(
     ):
         if value:
             anchors.append((column, value))
-
     anchor_sql = " OR ".join(
-        f"LOWER(a.{column}) = LOWER(%s)"
-        for column, _ in anchors
+        f"LOWER(a.{column}) = LOWER(%s)" for column, _ in anchors
     )
     params = [start, end, *[value for _, value in anchors]]
     cur.execute(
@@ -672,7 +687,12 @@ def orchestrate_alert_sqlite(
             before_minutes=evidence_before_minutes,
             after_minutes=evidence_after_minutes,
         )
-        count = _merge_evidence(evidence_path, window.events)
+        count = _merge_evidence(
+            evidence_path,
+            window.events,
+            case_id=case_id,
+            source=alert.source,
+        )
         with connect(db_path) as conn:
             conn.execute(
                 "UPDATE cases SET evidence_path=? WHERE case_id=?",
@@ -722,7 +742,12 @@ def orchestrate_alert_postgres(
             before_minutes=evidence_before_minutes,
             after_minutes=evidence_after_minutes,
         )
-        count = _merge_evidence(evidence_path, window.events)
+        count = _merge_evidence(
+            evidence_path,
+            window.events,
+            case_id=case_id,
+            source=alert.source,
+        )
         with _connect(dsn) as conn:
             with conn.cursor() as cur:
                 cur.execute(

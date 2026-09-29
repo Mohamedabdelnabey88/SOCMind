@@ -22,6 +22,9 @@ def build_dashboard_payload(events: list[Event], *, case_id: str) -> dict:
 
     finding_rows = []
     for finding in findings:
+        evidence = sorted(finding.evidence, key=lambda item: item.timestamp)
+        detected_at = evidence[-1].timestamp.isoformat() if evidence else None
+        detection_source = evidence[-1].source if evidence else "socmind-detection"
         finding_rows.append({
             "title": finding.title,
             "severity": finding.severity,
@@ -30,6 +33,8 @@ def build_dashboard_payload(events: list[Event], *, case_id: str) -> dict:
             "techniques": finding.techniques,
             "triage": asdict(triage(finding)),
             "playbook": [asdict(step) for step in select_playbook(finding)],
+            "detected_at": detected_at,
+            "source": detection_source,
         })
 
     return {

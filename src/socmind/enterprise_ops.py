@@ -83,8 +83,13 @@ def postgres_schema() -> str:
   source TEXT,
   title TEXT,
   acknowledged_at TIMESTAMPTZ,
-  evidence_path TEXT
+  evidence_path TEXT,
+  sla_paused_at TIMESTAMPTZ,
+  sla_paused_seconds BIGINT NOT NULL DEFAULT 0
 );
+
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS sla_paused_at TIMESTAMPTZ;
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS sla_paused_seconds BIGINT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS case_notes (
   id BIGSERIAL PRIMARY KEY,
@@ -132,18 +137,23 @@ CREATE TABLE IF NOT EXISTS case_alerts (
   PRIMARY KEY(case_id, alert_id)
 );
 
-CREATE TABLE IF NOT EXISTS evidence_requirements (
-    requirement_id TEXT PRIMARY KEY,
-    case_id TEXT NOT NULL REFERENCES cases(case_id),
-    label TEXT NOT NULL,
-    origin TEXT NOT NULL,
-    state TEXT NOT NULL,
-    evidence_reference TEXT,
-    updated_at TEXT NOT NULL,
-    actor TEXT NOT NULL,
-    reason TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS evidence_collections (
+  id BIGSERIAL PRIMARY KEY,
+  collection_id TEXT NOT NULL UNIQUE,
+  case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  source_ref TEXT NOT NULL,
+  window_start TIMESTAMPTZ NOT NULL,
+  window_end TIMESTAMPTZ NOT NULL,
+  query_json JSONB NOT NULL,
+  status TEXT NOT NULL,
+  event_count INTEGER NOT NULL DEFAULT 0,
+  total_hits INTEGER,
+  truncated BOOLEAN NOT NULL DEFAULT FALSE,
+  error TEXT,
+  started_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ
 );
-CREATE INDEX IF NOT EXISTS idx_requirements_case ON evidence_requirements(case_id, state);
 
 CREATE TABLE IF NOT EXISTS evidence_artifacts (
     artifact_id TEXT PRIMARY KEY,
@@ -172,4 +182,29 @@ CREATE INDEX IF NOT EXISTS idx_alerts_dst_time ON alerts(dst_ip, timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_rule_time ON alerts(LOWER(rule_id), timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_technique_time ON alerts(LOWER(technique), timestamp);
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
+CREATE TABLE IF NOT EXISTS evidence_requirements (
+  requirement_id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  source TEXT NOT NULL,
+  target TEXT,
+  rationale TEXT NOT NULL,
+  status TEXT NOT NULL,
+  requested_by TEXT NOT NULL,
+  assigned_to TEXT,
+  due_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  received_at TIMESTAMPTZ,
+  response_summary TEXT,
+  evidence_reference TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_evidence_collections_case ON evidence_collections(case_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requirements_case ON evidence_requirements(case_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requirements_status ON evidence_requirements(status, due_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_requirements_open_key
+ON evidence_requirements(case_id, key)
+WHERE status IN ('required','requested');
 """

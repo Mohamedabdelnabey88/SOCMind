@@ -1,83 +1,129 @@
-"""Artifact metadata is immutable; verification is an audited observation."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-import stat
-
-from .evidence_requests import transaction, _case, _audit, _text
-from .evidence_storage import EvidenceStore, MAX_ARTIFACT_BYTES, digest
-from .rbac import Principal, require_permission
-
-SCHEMA = '''CREATE TABLE IF NOT EXISTS evidence_artifacts (
-    artifact_id TEXT PRIMARY KEY,
-    case_id TEXT NOT NULL REFERENCES cases(case_id),
-    sha256 TEXT NOT NULL,
-    size_bytes BIGINT NOT NULL,
-    original_name TEXT NOT NULL,
-    collected_at TEXT NOT NULL,
-    collector TEXT NOT NULL,
-    source TEXT NOT NULL,
-    storage_key TEXT NOT NULL,
-    storage_id TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_artifacts_case ON evidence_artifacts(case_id);
-'''
 
 
-def register_artifact(target, case_id, path, store: EvidenceStore, *, storage_id, source,
-                      principal: Principal, postgres=False):
-    require_permission(principal, 'case.note')
-    source, storage_id = _text(source, 'Source'), _text(storage_id, 'Storage identifier')
-    path = Path(path).absolute()
-    if any(p.is_symlink() for p in [path, *path.parents]):
-        raise ValueError('Symlink artifacts are not permitted')
-    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
-    with os.fdopen(fd, 'rb') as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            raise ValueError('Artifact must be a regular file')
-        data = stream.read(MAX_ARTIFACT_BYTES + 1)
-    if len(data) > MAX_ARTIFACT_BYTES:
-        raise ValueError('Artifact exceeds 64 MiB limit')
-    sha = digest(data)
-    artifact_id = hashlib.sha256(json.dumps([case_id, sha, path.name, source, storage_id]).encode()).hexdigest()
-    now = datetime.now(timezone.utc).isoformat()
-    with transaction(target, postgres=postgres) as execute:
-        _case(execute, case_id, postgres)
-        existing = execute('SELECT * FROM evidence_artifacts WHERE artifact_id=?', (artifact_id,)).fetchone()
-        if existing:
-            if digest(store.get(sha)) != sha:
-                raise ValueError('Registered evidence has been modified')
-            return dict(existing)
-        # An interrupted DB commit can leave an unreferenced blob, never deleted silently.
-        store.put(sha, data)
-        execute('INSERT INTO evidence_artifacts VALUES(?,?,?,?,?,?,?,?,?,?)',
-                (artifact_id, case_id, sha, len(data), path.name, now, principal.subject, source, sha, storage_id))
-        _audit(execute, case_id, principal.subject, 'evidence-registered',
-               {'artifact_id': artifact_id, 'sha256': sha, 'size_bytes': len(data), 'source': source}, now)
-        return dict(execute('SELECT * FROM evidence_artifacts WHERE artifact_id=?', (artifact_id,)).fetchone())
+MANIFEST_VERSION = 1
 
 
-def verify_artifacts(target, case_id, stores: dict[str, EvidenceStore], *, principal, postgres=False):
-    require_permission(principal, 'case.read')
-    now = datetime.now(timezone.utc).isoformat()
-    results = []
-    with transaction(target, postgres=postgres) as execute:
-        _case(execute, case_id, postgres)
-        rows = execute('SELECT * FROM evidence_artifacts WHERE case_id=? ORDER BY artifact_id', (case_id,)).fetchall()
-        for row in rows:
-            item = dict(row)
-            try:
-                data = stores[item['storage_id']].get(item['storage_key'])
-                status = 'verified' if len(data) == item['size_bytes'] and digest(data) == item['sha256'] else 'mismatch'
-            except FileNotFoundError:
-                status = 'missing'
-            except (OSError, ValueError, KeyError):
-                status = 'unavailable'
-            results.append({**item, 'integrity_status': status, 'verified_at': now})
-        _audit(execute, case_id, principal.subject, 'evidence-verified',
-               [{'artifact_id': item['artifact_id'], 'status': item['integrity_status']} for item in results], now)
-    return results
+@dataclass(frozen=True, slots=True)
+class EvidenceVerification:
+    evidence_path: str
+    manifest_path: str
+    valid: bool
+    expected_sha256: str
+    actual_sha256: str
+    expected_size: int
+    actual_size: int
+    expected_event_count: int
+    actual_event_count: int
+    errors: tuple[str, ...]
+
+
+def evidence_manifest_path(evidence_path: str | Path) -> Path:
+    path = Path(evidence_path)
+    return Path(str(path) + ".manifest.json")
+
+
+def sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _count_jsonl_events(path: Path) -> int:
+    with path.open("r", encoding="utf-8") as fh:
+        return sum(1 for line in fh if line.strip())
+
+
+def write_evidence_manifest(
+    evidence_path: str | Path,
+    *,
+    case_id: str,
+    source: str,
+    event_count: int | None = None,
+    collected_at: str | None = None,
+) -> Path:
+    evidence = Path(evidence_path)
+    if not evidence.is_file():
+        raise FileNotFoundError(evidence)
+
+    count = _count_jsonl_events(evidence) if event_count is None else int(event_count)
+    manifest = {
+        "manifest_version": MANIFEST_VERSION,
+        "case_id": str(case_id),
+        "file_name": evidence.name,
+        "sha256": sha256_file(evidence),
+        "size_bytes": evidence.stat().st_size,
+        "collected_at": collected_at or datetime.now(timezone.utc).isoformat(),
+        "source": str(source),
+        "event_count": count,
+    }
+
+    target = evidence_manifest_path(evidence)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp = target.with_suffix(target.suffix + f".{os.getpid()}.tmp")
+    with temp.open("w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, ensure_ascii=False, indent=2, sort_keys=True)
+        fh.write("\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    temp.replace(target)
+    return target
+
+
+def verify_evidence_manifest(
+    evidence_path: str | Path,
+    manifest_path: str | Path | None = None,
+) -> EvidenceVerification:
+    evidence = Path(evidence_path)
+    manifest_file = Path(manifest_path) if manifest_path else evidence_manifest_path(evidence)
+    if not evidence.is_file():
+        raise FileNotFoundError(evidence)
+    if not manifest_file.is_file():
+        raise FileNotFoundError(manifest_file)
+
+    payload = json.loads(manifest_file.read_text(encoding="utf-8"))
+    expected_sha = str(payload.get("sha256") or "")
+    expected_size = int(payload.get("size_bytes", -1))
+    expected_count = int(payload.get("event_count", -1))
+
+    actual_sha = sha256_file(evidence)
+    actual_size = evidence.stat().st_size
+    actual_count = _count_jsonl_events(evidence)
+    errors: list[str] = []
+
+    if payload.get("manifest_version") != MANIFEST_VERSION:
+        errors.append("unsupported manifest_version")
+    if payload.get("file_name") != evidence.name:
+        errors.append("file_name mismatch")
+    if expected_sha != actual_sha:
+        errors.append("sha256 mismatch")
+    if expected_size != actual_size:
+        errors.append("size mismatch")
+    if expected_count != actual_count:
+        errors.append("event_count mismatch")
+
+    return EvidenceVerification(
+        evidence_path=str(evidence.resolve()),
+        manifest_path=str(manifest_file.resolve()),
+        valid=not errors,
+        expected_sha256=expected_sha,
+        actual_sha256=actual_sha,
+        expected_size=expected_size,
+        actual_size=actual_size,
+        expected_event_count=expected_count,
+        actual_event_count=actual_count,
+        errors=tuple(errors),
+    )
+
+
+def verification_payload(result: EvidenceVerification) -> dict:
+    return asdict(result)

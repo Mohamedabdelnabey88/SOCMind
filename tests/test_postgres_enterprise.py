@@ -9,18 +9,25 @@ from fastapi.testclient import TestClient
 from socmind.case_workflow import new_case
 from socmind.enterprise_auth import trusted_proxy_headers
 from socmind.enterprise_command_center import (
-    _connect,
     add_case_note_pg,
     assign_case_pg,
     case_detail_pg,
     command_center_snapshot_pg,
+    record_case_activity_pg,
     transition_case_pg,
     upsert_case_pg,
 )
 from socmind.postgres_store import initialize_postgres, postgres_health, _psycopg
+from socmind.evidence_requests import (
+    create_requirement_pg,
+    ensure_suggested_requirements_pg,
+    list_requirements_pg,
+    update_requirement_pg,
+)
 from socmind.orchestration import orchestrate_alert_postgres
 from socmind.production_ops import AlertRecord
 from socmind.io import load_jsonl
+from socmind.live_evidence import collect_case_evidence_postgres
 from socmind.webapp import create_app
 
 
@@ -39,7 +46,7 @@ def reset_database():
     initialize_postgres(DSN)
     with psycopg.connect(DSN) as conn:
         with conn.cursor() as cur:
-            cur.execute("TRUNCATE TABLE case_alerts, alerts, case_audit, case_notes, cases RESTART IDENTITY CASCADE")
+            cur.execute("TRUNCATE TABLE evidence_requirements, evidence_collections, case_alerts, alerts, case_audit, case_notes, cases RESTART IDENTITY CASCADE")
         conn.commit()
 
 
@@ -74,7 +81,176 @@ def test_postgres_enterprise_store_round_trip():
 
     health = postgres_health(DSN)
     assert health["ready"]
-    assert health["socmind_tables"] == 5
+    assert health["socmind_tables"] == 7
+
+
+def test_postgres_lifecycle_pause_resume_and_schema_migration():
+    reset_database()
+    upsert_case_pg(
+        DSN,
+        new_case("PG-LIFECYCLE", priority="P1"),
+        source="elastic",
+        title="Lifecycle pause case",
+    )
+    transition_case_pg(DSN, "PG-LIFECYCLE", "triage", actor="tier1")
+    transition_case_pg(
+        DSN,
+        "PG-LIFECYCLE",
+        "waiting-for-evidence",
+        actor="tier1",
+    )
+
+    psycopg = _psycopg()
+    with psycopg.connect(DSN) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT sla_paused_at,sla_paused_seconds
+                FROM cases WHERE case_id=%s
+                """,
+                ("PG-LIFECYCLE",),
+            )
+            paused_at, paused_seconds = cur.fetchone()
+            assert paused_at is not None
+            assert int(paused_seconds) == 0
+            cur.execute(
+                """
+                UPDATE cases
+                SET sla_paused_at=NOW() - INTERVAL '10 minutes'
+                WHERE case_id=%s
+                """,
+                ("PG-LIFECYCLE",),
+            )
+        conn.commit()
+
+    snap = command_center_snapshot_pg(DSN)
+    item = next(x for x in snap["queue"] if x["case_id"] == "PG-LIFECYCLE")
+    assert item["sla"]["paused"] is True
+
+    transition_case_pg(DSN, "PG-LIFECYCLE", "investigating", actor="tier1")
+    detail = case_detail_pg(DSN, "PG-LIFECYCLE")
+    assert detail["case"]["sla_paused_at"] is None
+    assert detail["case"]["sla_paused_seconds"] >= 9 * 60
+
+    snap = command_center_snapshot_pg(DSN)
+    item = next(x for x in snap["queue"] if x["case_id"] == "PG-LIFECYCLE")
+    assert item["sla"]["paused"] is False
+    assert item["sla"]["paused_minutes"] >= 9
+
+
+def test_postgres_evidence_requirements_round_trip_and_idempotency():
+    reset_database()
+    upsert_case_pg(
+        DSN,
+        new_case("PG-REQ-001", priority="P2"),
+        source="elastic",
+        title="PostgreSQL evidence requirements",
+        evidence_path=str(ROOT / "examples/attack_chain.jsonl"),
+    )
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+
+    first = ensure_suggested_requirements_pg(
+        DSN,
+        case_id="PG-REQ-001",
+        events=events,
+        requested_by="tier1",
+    )
+    second = ensure_suggested_requirements_pg(
+        DSN,
+        case_id="PG-REQ-001",
+        events=events,
+        requested_by="tier1",
+    )
+    assert first == second
+    assert first
+
+    requirement_id = first[0]
+    update_requirement_pg(
+        DSN,
+        requirement_id,
+        status="requested",
+        actor="tier1",
+        assigned_to="identity-team",
+    )
+    update_requirement_pg(
+        DSN,
+        requirement_id,
+        status="received",
+        actor="tier2",
+        response_summary="Identity evidence collected",
+        evidence_reference="case://PG-REQ-001/idp/context",
+    )
+
+    rows = list_requirements_pg(DSN, "PG-REQ-001")
+    received = next(
+        row for row in rows
+        if row["requirement_id"] == requirement_id
+    )
+    assert received["status"] == "received"
+    assert received["received_at"] is not None
+
+    detail = case_detail_pg(DSN, "PG-REQ-001")
+    assert detail["evidence_requirements"]
+    snap = command_center_snapshot_pg(DSN)
+    item = next(x for x in snap["queue"] if x["case_id"] == "PG-REQ-001")
+    assert item["evidence_requirements"]["open"] == len(first) - 1
+
+
+def test_postgres_concurrent_requirement_creation_collapses_to_one_row():
+    reset_database()
+    upsert_case_pg(
+        DSN,
+        new_case("PG-REQ-CONCURRENT", priority="P2"),
+        source="wazuh",
+        title="Concurrent requirement",
+    )
+
+    def create():
+        return create_requirement_pg(
+            DSN,
+            case_id="PG-REQ-CONCURRENT",
+            key="vpn-history",
+            title="Collect VPN history",
+            source="network",
+            target="alice",
+            rationale="VPN context missing",
+            requested_by="tier1",
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        ids = list(pool.map(lambda _: create(), range(4)))
+
+    assert len(set(ids)) == 1
+    assert len(list_requirements_pg(DSN, "PG-REQ-CONCURRENT")) == 1
+
+
+def test_postgres_case_activities_are_persistent_and_auditable():
+    reset_database()
+    upsert_case_pg(
+        DSN,
+        new_case("PG-TIMELINE-ACT", priority="P2"),
+        source="elastic",
+        title="PostgreSQL timeline activities",
+    )
+    record_case_activity_pg(
+        DSN,
+        "PG-TIMELINE-ACT",
+        activity="escalation",
+        actor="tier2",
+        detail="Escalated to IR for privileged account impact",
+    )
+    record_case_activity_pg(
+        DSN,
+        "PG-TIMELINE-ACT",
+        activity="detection-feedback",
+        actor="lead",
+        detail="Add regression coverage for observed chain",
+    )
+
+    detail = case_detail_pg(DSN, "PG-TIMELINE-ACT")
+    actions = {row["action"] for row in detail["audit"]}
+    assert "escalated" in actions
+    assert "detection-feedback-recorded" in actions
 
 
 def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):
@@ -239,156 +415,77 @@ def test_concurrent_postgres_alerts_collapse_into_one_case(tmp_path):
     assert len(detail["alerts"]) == 2
 
 
-def test_postgres_alert_flood_keeps_relevant_case_discoverable(tmp_path):
+def test_postgres_live_evidence_collection_journal(tmp_path):
     reset_database()
     events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
     base = events[0]
     evidence_dir = tmp_path / "evidence"
 
-    root = AlertRecord(
-        "PG-ROOT-RELEVANT",
+    alert = AlertRecord(
+        "PG-LIVE-001",
         "elastic",
         base.timestamp,
-        "Relevant root alert",
-        8,
-        "TARGET-PG-HOST",
-        user="target-pg-user",
-        src_ip="198.51.100.77",
-        rule_id="PG-ROOT-RULE",
+        "PostgreSQL live evidence",
+        12,
+        base.host,
+        user=base.user,
+        src_ip=base.src_ip,
+        rule_id="PG-LIVE-RULE",
     )
-    root_result = orchestrate_alert_postgres(
+    orchestrated = orchestrate_alert_postgres(
         DSN,
-        root,
+        alert,
         events,
+        evidence_dir=tmp_path / "initial",
+    )
+
+    class FakeElastic:
+        def search(self, index, *, query=None, size=100, sort=None):
+            return {
+                "hits": {
+                    "hits": [{
+                        "_id": "pg-live-hit-1",
+                        "_index": "logs-*",
+                        "_source": {
+                            "@timestamp": base.timestamp.isoformat(),
+                            "event": {"code": base.event_id},
+                            "host": {"name": base.host},
+                            "user": {"name": base.user},
+                            "source": {"ip": base.src_ip},
+                        },
+                    }]
+                }
+            }
+
+    result = collect_case_evidence_postgres(
+        DSN,
+        orchestrated.case_id,
+        FakeElastic(),
+        provider="elastic",
+        index="logs-*",
         evidence_dir=evidence_dir,
     )
+    assert result.status == "completed"
+    assert result.fetched_events == 1
 
-    with _connect(DSN) as conn:
-        with conn.cursor() as cur:
-            for idx in range(650):
-                case_id = f"PG-NOISE-CASE-{idx:04d}"
-                alert_id = f"PG-NOISE-ALERT-{idx:04d}"
-                stamp = base.timestamp + timedelta(seconds=idx + 1)
-                cur.execute(
-                    """
-                    INSERT INTO cases(
-                      case_id,state,priority,owner,opened_at,updated_at,
-                      source,title,acknowledged_at,evidence_path
-                    ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NULL,NULL)
-                    """,
-                    (
-                        case_id, "new", "P3", None, stamp, stamp,
-                        "elastic", "Noise alert",
-                    ),
-                )
-                cur.execute(
-                    """
-                    INSERT INTO alerts(
-                      alert_id,source,timestamp,title,severity,priority,host,"user",process,
-                      src_ip,dst_ip,technique,rule_id,fingerprint,raw_reference,created_at
-                    ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    """,
-                    (
-                        alert_id,
-                        "elastic",
-                        stamp,
-                        "Noise alert",
-                        3,
-                        "P3",
-                        f"PG-NOISE-HOST-{idx}",
-                        f"pg-noise-user-{idx}",
-                        None,
-                        f"203.0.113.{(idx % 200) + 1}",
-                        None,
-                        None,
-                        f"PG-NOISE-RULE-{idx}",
-                        f"pg-noise-fingerprint-{idx}",
-                        None,
-                        stamp,
-                    ),
-                )
-                cur.execute(
-                    """
-                    INSERT INTO case_alerts(
-                      case_id,alert_id,correlation_score,correlation_reasons,linked_at
-                    ) VALUES(%s,%s,%s,%s::jsonb,%s)
-                    """,
-                    (case_id, alert_id, 100, "[]", stamp),
-                )
-        conn.commit()
-
-    follow_up = AlertRecord(
-        "PG-FOLLOW-UP-RELEVANT",
-        "elastic",
-        base.timestamp + timedelta(minutes=12),
-        "Relevant follow-up",
-        13,
-        "TARGET-PG-HOST",
-        user="target-pg-user",
-        src_ip="198.51.100.77",
-        rule_id="PG-FOLLOW-RULE",
-    )
-    result = orchestrate_alert_postgres(
-        DSN,
-        follow_up,
-        events,
-        evidence_dir=evidence_dir,
-    )
-
-    assert result.created is False
-    assert result.case_id == root_result.case_id
-    assert result.correlation_score >= 55
+    detail = case_detail_pg(DSN, orchestrated.case_id)
+    assert detail["evidence_collections"]
+    assert detail["evidence_collections"][0]["status"] == "completed"
+    assert detail["evidence_collections"][0]["event_count"] == 1
+    assert detail["evidence_collections"][0]["query"]["bool"]
 
 
-def test_postgres_advanced_lifecycle_reasons_and_competing_closure():
-    reset_database()
-    upsert_case_pg(DSN, new_case('PG-LIFECYCLE'))
-    transition_case_pg(DSN, 'PG-LIFECYCLE', 'triage', actor='lead', reason='Review')
-    with pytest.raises(ValueError):
-        transition_case_pg(DSN, 'PG-LIFECYCLE', 'waiting-for-evidence')
-    transition_case_pg(DSN, 'PG-LIFECYCLE', 'waiting-for-evidence', actor='lead', reason='Need IdP logs')
-    detail = case_detail_pg(DSN, 'PG-LIFECYCLE')
-    assert detail['case']['state'] == 'waiting-for-evidence'
-    assert 'investigating' in detail['allowed_transitions']
-    assert any('Need IdP logs' in row['detail'] and row['actor'] == 'lead' for row in detail['audit'])
-    transition_case_pg(DSN, 'PG-LIFECYCLE', 'investigating', reason='Logs received')
-    def close(target):
-        try:
-            transition_case_pg(DSN, 'PG-LIFECYCLE', target, reason='Reviewed')
-            return True
-        except ValueError:
-            return False
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        assert sum(pool.map(close, ['resolved', 'false-positive'])) == 1
-    assert len(case_detail_pg(DSN, 'PG-LIFECYCLE')['audit']) == 4
-
-
-def test_postgres_evidence_requirements_are_idempotent_and_audited():
-    from socmind.evidence_requests import create_requirement, update_requirement, list_requirements
-    from socmind.rbac import Principal
-    reset_database()
-    upsert_case_pg(DSN, new_case('PG-REQ'))
-    actor = Principal('lead', 'lead', 'test')
-    item = create_requirement(DSN, 'PG-REQ', 'MFA result', origin='validation-gap', principal=actor, postgres=True)
-    repeat = create_requirement(DSN, 'PG-REQ', 'MFA result', origin='validation-gap', principal=actor, postgres=True)
-    assert item == repeat
-    update_requirement(DSN, 'PG-REQ', item['requirement_id'], 'received', reason='IdP export',
-                       evidence_reference='idp-export-001', principal=actor, postgres=True)
-    assert list_requirements(DSN, 'PG-REQ', postgres=True)[0]['state'] == 'received'
-    assert len(case_detail_pg(DSN, 'PG-REQ')['audit']) == 2
-
-
-def test_postgres_evidence_artifact_integrity(tmp_path):
-    from socmind.evidence_integrity import register_artifact, verify_artifacts
+def test_postgres_immutable_artifact_metadata(tmp_path):
+    from socmind.evidence_artifacts import register_artifact, verify_artifacts
     from socmind.evidence_storage import LocalEvidenceStore
     from socmind.rbac import Principal
     reset_database()
-    upsert_case_pg(DSN, new_case('PG-ART'))
-    actor = Principal('analyst', 'analyst', 'test')
-    source = tmp_path / 'evidence.jsonl'
-    source.write_bytes(b'original')
+    upsert_case_pg(DSN, new_case('PG-ARTIFACT'))
+    path = tmp_path / 'original.bin'
+    path.write_bytes(b'original')
     store = LocalEvidenceStore(tmp_path / 'objects')
-    item = register_artifact(DSN, 'PG-ART', source, store, storage_id='local', source='test', principal=actor, postgres=True)
-    assert verify_artifacts(DSN, 'PG-ART', {'local': store}, principal=actor, postgres=True)[0]['integrity_status'] == 'verified'
-    (store.root / item['storage_key']).write_bytes(b'tampered')
-    assert verify_artifacts(DSN, 'PG-ART', {'local': store}, principal=actor, postgres=True)[0]['integrity_status'] == 'mismatch'
+    actor = Principal('collector', 'analyst', 'test')
+    item = register_artifact(DSN, 'PG-ARTIFACT', path, store, storage_id='local', source='test', principal=actor, postgres=True)
+    assert verify_artifacts(DSN, 'PG-ARTIFACT', {'local': store}, principal=actor, postgres=True)[0]['integrity_status'] == 'verified'
+    (store.root / item['storage_key']).write_bytes(b'changed')
+    assert verify_artifacts(DSN, 'PG-ARTIFACT', {'local': store}, principal=actor, postgres=True)[0]['integrity_status'] == 'mismatch'

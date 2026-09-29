@@ -1,0 +1,9 @@
+{"timestamp": "2026-09-28T10:00:00Z", "source": "windows-security", "event_id": "4625", "host": "WS-023", "user": "m.abdelnaby", "src_ip": "198.51.100.22"}
+{"timestamp": "2026-09-28T10:00:30Z", "source": "windows-security", "event_id": "4625", "host": "WS-023", "user": "m.abdelnaby", "src_ip": "198.51.100.22"}
+{"timestamp": "2026-09-28T10:01:00Z", "source": "windows-security", "event_id": "4625", "host": "WS-023", "user": "m.abdelnaby", "src_ip": "198.51.100.22"}
+{"timestamp": "2026-09-28T10:01:30Z", "source": "windows-security", "event_id": "4625", "host": "WS-023", "user": "m.abdelnaby", "src_ip": "198.51.100.22"}
+{"timestamp": "2026-09-28T10:02:00Z", "source": "windows-security", "event_id": "4625", "host": "WS-023", "user": "m.abdelnaby", "src_ip": "198.51.100.22"}
+{"timestamp": "2026-09-28T10:02:30Z", "source": "windows-security", "event_id": "4624", "host": "WS-023", "user": "m.abdelnaby", "src_ip": "198.51.100.22"}
+{"timestamp": "2026-09-28T10:03:00Z", "source": "sysmon", "event_id": "1", "host": "WS-023", "user": "m.abdelnaby", "process": "powershell.exe", "parent_process": "winword.exe", "command_line": "powershell.exe -nop -w hidden"}
+{"timestamp": "2026-09-28T10:03:20Z", "source": "sysmon", "event_id": "3", "host": "WS-023", "user": "m.abdelnaby", "process": "powershell.exe", "dst_ip": "203.0.113.77"}
+{"timestamp": "2026-09-28T10:04:00Z", "source": "windows-security", "event_id": "4698", "host": "WS-023", "user": "m.abdelnaby"}

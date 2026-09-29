@@ -219,7 +219,7 @@ def _elastic_technique(source: dict) -> str | None:
     if isinstance(tags, str):
         tags = [tags]
     return next(
-        (str(item).upper() for item in tags if str(item).lower().startswith("attack.t")),
+        (str(item).upper().replace("ATTACK.", "") for item in tags if str(item).lower().startswith("attack.t")),
         None,
     )
 

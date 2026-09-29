@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[sigma,web]" pytest httpx
+      - run: pip install --retries 8 --timeout 60 -e ".[sigma,web]" pytest httpx
       - run: python -m compileall -q src
       - run: node --check src/socmind/web/app.js
       - run: pytest -q
@@ -76,8 +76,11 @@ jobs:
       - run: socmind enterprise-info --json
       - run: socmind postgres-schema -o socmind-postgres.sql
       - run: socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database alert-ci.db --evidence wazuh.jsonl --evidence-dir alert-evidence --json
-      - run: socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database alert-ci.db --evidence wazuh.jsonl --evidence-dir alert-evidence --json
+      - run: python -c "import glob,subprocess; p=glob.glob('alert-evidence/*.jsonl')[0]; subprocess.check_call(['socmind','evidence-verify',p,'--json'])"
       - run: socmind alert-orchestrate elastic tests/fixtures/elastic-security-alerts.ndjson --database elastic-alert-ci.db --evidence-dir elastic-alert-evidence --json
+      - run: socmind alert-live --help
+      - run: socmind case-collect-evidence --help
+      - run: socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database alert-ci.db --evidence wazuh.jsonl --evidence-dir alert-evidence --json
 
   kali:
     runs-on: ubuntu-latest
@@ -90,7 +93,7 @@ jobs:
       - name: Create isolated Kali environment
         run: python3 -m venv .venv
       - name: Install SOCMind in Kali venv
-        run: .venv/bin/pip install -e ".[sigma,web]" pytest httpx
+        run: .venv/bin/pip install --retries 8 --timeout 60 -e ".[sigma,web]" pytest httpx
       - name: Run test suite on Kali
         run: .venv/bin/pytest -q
       - name: Exercise Kali investigation workflow
@@ -143,8 +146,10 @@ jobs:
           .venv/bin/socmind enterprise-info --json
           .venv/bin/socmind postgres-schema -o kali-postgres.sql
           .venv/bin/socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database kali-alerts.db --evidence wazuh-kali.jsonl --evidence-dir kali-alert-evidence --json
-          .venv/bin/socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database kali-alerts.db --evidence wazuh-kali.jsonl --evidence-dir kali-alert-evidence --json
           .venv/bin/socmind alert-orchestrate elastic tests/fixtures/elastic-security-alerts.ndjson --database kali-elastic-alerts.db --evidence-dir kali-elastic-alert-evidence --json
+          .venv/bin/socmind alert-live --help
+          .venv/bin/socmind case-collect-evidence --help
+          .venv/bin/socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database kali-alerts.db --evidence wazuh-kali.jsonl --evidence-dir kali-alert-evidence --json
       - name: Exercise web dashboard on Kali
         shell: bash
         run: |
@@ -175,6 +180,8 @@ jobs:
       - run: wheel-venv/bin/socmind enterprise-info --json
       - run: wheel-venv/bin/socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database wheel-alerts.db --evidence-dir wheel-alert-evidence --json
       - run: wheel-venv/bin/socmind alert-orchestrate elastic tests/fixtures/elastic-security-alerts.ndjson --database wheel-elastic-alerts.db --evidence-dir wheel-elastic-evidence --json
+      - run: wheel-venv/bin/socmind alert-live --help
+      - run: wheel-venv/bin/socmind case-collect-evidence --help
       - run: wheel-venv/bin/socmind doctor
       - name: Verify packaged web assets
         shell: bash
@@ -212,7 +219,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[sigma,web,enterprise]" pytest httpx
+      - run: pip install --retries 8 --timeout 60 -e ".[sigma,web,enterprise]" pytest httpx
       - run: socmind postgres-init
       - run: socmind postgres-health --json
       - run: pytest -q tests/test_enterprise_foundation.py tests/test_postgres_enterprise.py
@@ -220,3 +227,44 @@ jobs:
       - run: socmind trusted-sign --subject ci-analyst@example.com --role analyst
       - run: socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --postgres-dsn "$SOCMIND_POSTGRES_DSN" --evidence-dir pg-alert-evidence --json
       - run: socmind alert-orchestrate elastic tests/fixtures/elastic-security-alerts.ndjson --postgres-dsn "$SOCMIND_POSTGRES_DSN" --evidence-dir pg-elastic-alert-evidence --json
+      - run: socmind alert-live --help
+
+  object-storage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[storage]" pytest
+      - name: Start isolated HTTPS MinIO
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/socmind-minio-certs"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout "$RUNNER_TEMP/socmind-minio-certs/private.key" \
+            -out "$RUNNER_TEMP/socmind-minio-certs/public.crt" \
+            -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+          storage_test_password=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          echo "::add-mask::$storage_test_password"
+          echo "AWS_ACCESS_KEY_ID=socmind-ci" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=$storage_test_password" >> "$GITHUB_ENV"
+          echo "AWS_DEFAULT_REGION=us-east-1" >> "$GITHUB_ENV"
+          echo "AWS_CA_BUNDLE=$RUNNER_TEMP/socmind-minio-certs/public.crt" >> "$GITHUB_ENV"
+          echo "SOCMIND_TEST_S3_ENDPOINT=https://localhost:9000" >> "$GITHUB_ENV"
+          docker run -d --name socmind-minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=socmind-ci -e MINIO_ROOT_PASSWORD="$storage_test_password" \
+            -v "$RUNNER_TEMP/socmind-minio-certs:/certs:ro" \
+            quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z server /data --certs-dir /certs
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --cacert "$RUNNER_TEMP/socmind-minio-certs/public.crt" https://localhost:9000/minio/health/ready; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs socmind-minio
+          exit 1
+      - run: pytest -q tests/test_object_storage_integration.py
+      - name: Stop isolated test service
+        if: always()
+        run: docker rm -f socmind-minio

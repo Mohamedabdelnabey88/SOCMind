@@ -42,6 +42,10 @@ Operate:
   socmind command-ack socmind.db INC-001
   socmind command-assign socmind.db INC-001 --owner tier2 --actor shift-lead
   socmind command-transition socmind.db INC-001 --state triage --actor tier2
+  socmind command-transition socmind.db INC-001 --state investigating --actor tier2
+  socmind command-transition socmind.db INC-001 --state waiting-for-evidence --actor tier2
+  # waiting-for-evidence / waiting-for-user pause the operational SLA clock
+  # resume with investigating or monitoring when the dependency clears
   socmind command-note socmind.db INC-001 --author tier2 --text "Validated source identity."
   socmind command-show socmind.db INC-001
 """,
@@ -83,6 +87,17 @@ Coverage and gaps:
 Tuning feedback:
   socmind tune examples/dispositions.jsonl
   socmind lead-health examples/attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl
+
+Governed lifecycle:
+  socmind rule-register rule-registry.json detections/windows/suspicious-powershell.yml \
+    --owner detection-team --actor tier2@example.com --role senior-analyst
+  socmind rule-transition rule-registry.json socmind-win-powershell-hidden \
+    --state testing --actor tier2@example.com --role senior-analyst --note "Begin validation"
+
+Validation evidence is recorded with the current rule version and SHA-256.
+Approval requires syntax PASS, regression PASS, incident replay, FP history and coverage delta.
+Only Lead/Admin authority can approve or promote a rule to production.
+SOCMind never auto-promotes detection rules.
 """,
     "kali": """SOCMind on Kali Linux
 
@@ -199,6 +214,19 @@ Enterprise web example:
     --host 0.0.0.0
 
 The trusted-proxy mode is designed for deployment behind an authenticating reverse proxy / identity-aware gateway. The proxy must strip client-supplied X-SOCMind-* identity headers and generate fresh signed headers.
+
+Native OIDC:
+  export SOCMIND_OIDC_ISSUER='https://idp.example.com'
+  export SOCMIND_OIDC_CLIENT_ID='socmind-client'
+  export SOCMIND_OIDC_REDIRECT_URI='https://socmind.example.com/auth/callback'
+  export SOCMIND_OIDC_SESSION_SECRET='replace-with-a-long-random-secret'
+  export SOCMIND_OIDC_ROLE_MAP='{"SOC-T1":"analyst","SOC-T2":"senior-analyst","SOC-Leads":"lead","SOC-Admins":"admin"}'
+  socmind web events.jsonl --auth-mode oidc --host 0.0.0.0
+
+Confidential-client secret:
+  SOCMIND_OIDC_CLIENT_SECRET (environment only)
+
+OIDC uses Authorization Code + PKCE S256, discovery/JWKS validation, signed HttpOnly sessions and claim-to-role mapping.
 """,
     "production-ops": """SOCMind Production SOC Operations
 
@@ -226,21 +254,37 @@ Outcomes:
 - CORRELATED: alert was linked to an existing active case with explainable reasons
 - DUPLICATE: the same source alert ID was already ingested
 
-Live pull:
+Live alert ingestion:
   socmind alert-live elastic https://elastic:9200 .alerts-security.alerts-default \
     --database socmind.db --json
 
-  export WAZUH_INDEXER_USERNAME='...'
+  export WAZUH_INDEXER_USER='...'
   export WAZUH_INDEXER_PASSWORD='...'
   socmind alert-live wazuh-indexer https://wazuh-indexer:9200 'wazuh-alerts*' \
     --database socmind.db --json
 
-Elastic uses ELASTIC_API_KEY / ELASTIC_BEARER_TOKEN / ELASTIC_USERNAME+PASSWORD.
-Wazuh Indexer uses WAZUH_INDEXER_JWT or WAZUH_INDEXER_USERNAME+PASSWORD.
-
-TLS verification is ON by default. --insecure is for controlled labs only.
+Elastic uses ELASTIC_API_KEY / ELASTIC_BEARER_TOKEN / ELASTIC_USER+PASSWORD.
+Wazuh Indexer uses WAZUH_INDEXER_JWT or WAZUH_INDEXER_USER+PASSWORD.
+TLS verification is enabled by default.
 
 Correlation is deterministic and auditable. It does not claim attacker attribution.
+
+Collect live case evidence from Elastic:
+  export ELASTIC_API_KEY='...'
+  socmind case-collect-evidence INC-2026-001 elastic https://elastic:9200 'logs-*' \
+    --database socmind.db \
+    --evidence-dir evidence
+
+Collect from Wazuh Indexer / OpenSearch:
+  export WAZUH_INDEXER_USER='...'
+  export WAZUH_INDEXER_PASSWORD='...'
+  socmind case-collect-evidence INC-2026-001 wazuh-indexer https://indexer:9200 'wazuh-alerts-*' \
+    --database socmind.db \
+    --evidence-dir evidence
+
+The collector derives its time window and identity context from the case's linked alerts,
+merges normalized events into the case evidence package, and journals every collection.
+TLS verification is enabled by default.
 """,
     "demo": """SOCMind Portfolio Demo
 

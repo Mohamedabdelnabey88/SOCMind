@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .case_workflow import ALLOWED, CaseState, transition_detail
+from .case_workflow import ALLOWED, CLOSED_STATES, PAUSED_STATES, CaseState, state_history_from_audit
 from .sla import evaluate_sla
 
 
@@ -23,6 +23,8 @@ class CommandCase:
     title: str | None = None
     acknowledged_at: str | None = None
     evidence_path: str | None = None
+    sla_paused_at: str | None = None
+    sla_paused_seconds: int = 0
 
 
 SCHEMA = """
@@ -36,7 +38,9 @@ CREATE TABLE IF NOT EXISTS cases (
     source TEXT,
     title TEXT,
     acknowledged_at TEXT,
-    evidence_path TEXT
+    evidence_path TEXT,
+    sla_paused_at TEXT,
+    sla_paused_seconds INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS case_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,19 +86,24 @@ CREATE TABLE IF NOT EXISTS case_alerts (
     FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE,
     FOREIGN KEY(alert_id) REFERENCES alerts(alert_id) ON DELETE CASCADE
 );
-CREATE TABLE IF NOT EXISTS evidence_requirements (
-    requirement_id TEXT PRIMARY KEY,
-    case_id TEXT NOT NULL REFERENCES cases(case_id),
-    label TEXT NOT NULL,
-    origin TEXT NOT NULL,
-    state TEXT NOT NULL,
-    evidence_reference TEXT,
-    updated_at TEXT NOT NULL,
-    actor TEXT NOT NULL,
-    reason TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS evidence_collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id TEXT NOT NULL UNIQUE,
+    case_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    source_ref TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    query_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    event_count INTEGER NOT NULL DEFAULT 0,
+    total_hits INTEGER,
+    truncated INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_requirements_case ON evidence_requirements(case_id, state);
-
 CREATE TABLE IF NOT EXISTS evidence_artifacts (
     artifact_id TEXT PRIMARY KEY,
     case_id TEXT NOT NULL REFERENCES cases(case_id),
@@ -122,48 +131,67 @@ CREATE INDEX IF NOT EXISTS idx_alerts_dst_time ON alerts(dst_ip,timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_rule_time ON alerts(rule_id COLLATE NOCASE,timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_technique_time ON alerts(technique COLLATE NOCASE,timestamp);
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
+CREATE TABLE IF NOT EXISTS evidence_requirements (
+    requirement_id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    source TEXT NOT NULL,
+    target TEXT,
+    rationale TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    assigned_to TEXT,
+    due_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    received_at TEXT,
+    response_summary TEXT,
+    evidence_reference TEXT,
+    FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_collections_case ON evidence_collections(case_id,started_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requirements_case ON evidence_requirements(case_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requirements_status ON evidence_requirements(status,due_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_requirements_open_key
+ON evidence_requirements(case_id,key)
+WHERE status IN ('required','requested');
 """
 
 
-def _retry_locked(operation, *, attempts: int = 8):
-    delay = 0.02
+def _retry_locked(operation, *, attempts: int = 20):
     for attempt in range(attempts):
         try:
             return operation()
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc).lower() or attempt == attempts - 1:
                 raise
-            time.sleep(delay)
-            delay = min(delay * 2, 0.5)
+            time.sleep(min(0.05 * (attempt + 1), 0.5))
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path), timeout=30.0)
+    conn = sqlite3.connect(str(path), timeout=10.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA busy_timeout=30000")
 
-    current_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-    if str(current_mode).lower() != "wal":
-        _retry_locked(lambda: conn.execute("PRAGMA journal_mode=WAL").fetchone())
+    def configure_journal():
+        mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+        if mode != "wal":
+            conn.execute("PRAGMA journal_mode=WAL")
 
+    _retry_locked(configure_journal)
     conn.execute("PRAGMA synchronous=NORMAL")
     _retry_locked(lambda: conn.executescript(SCHEMA))
-
-    columns = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(cases)").fetchall()
-    }
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
     for name, sql_type in {
         "acknowledged_at": "TEXT",
         "evidence_path": "TEXT",
+        "sla_paused_at": "TEXT",
+        "sla_paused_seconds": "INTEGER NOT NULL DEFAULT 0",
     }.items():
         if name not in columns:
-            _retry_locked(
-                lambda name=name, sql_type=sql_type: conn.execute(
-                    f"ALTER TABLE cases ADD COLUMN {name} {sql_type}"
-                )
-            )
+            conn.execute(f"ALTER TABLE cases ADD COLUMN {name} {sql_type}")
     conn.commit()
     return conn
 
@@ -182,9 +210,10 @@ def upsert_case(
             """
             INSERT INTO cases(
               case_id,state,priority,owner,opened_at,updated_at,
-              source,title,acknowledged_at,evidence_path
+              source,title,acknowledged_at,evidence_path,
+              sla_paused_at,sla_paused_seconds
             )
-            VALUES(?,?,?,?,?,?,?,?,NULL,?)
+            VALUES(?,?,?,?,?,?,?,?,NULL,?,?,?)
             ON CONFLICT(case_id) DO UPDATE SET
               state=excluded.state,
               priority=excluded.priority,
@@ -192,11 +221,14 @@ def upsert_case(
               updated_at=excluded.updated_at,
               source=COALESCE(excluded.source,cases.source),
               title=COALESCE(excluded.title,cases.title),
-              evidence_path=COALESCE(excluded.evidence_path,cases.evidence_path)
+              evidence_path=COALESCE(excluded.evidence_path,cases.evidence_path),
+              sla_paused_at=excluded.sla_paused_at,
+              sla_paused_seconds=excluded.sla_paused_seconds
             """,
             (
                 case.case_id, case.state, case.priority, case.owner,
                 case.opened_at, case.updated_at, source, title, evidence,
+                case.sla_paused_at, max(0, int(case.sla_paused_seconds)),
             ),
         )
         conn.commit()
@@ -247,22 +279,57 @@ def assign_case(db_path: str | Path, case_id: str, owner: str, *, actor: str = "
         conn.commit()
 
 
-def transition_case(db_path: str | Path, case_id: str, target: str, *, actor: str = "analyst", reason: str | None = None) -> None:
+def transition_case(
+    db_path: str | Path,
+    case_id: str,
+    target: str,
+    *,
+    actor: str = "analyst",
+    reason: str | None = None,
+) -> None:
     now = datetime.now(timezone.utc).isoformat()
     actor = actor.strip() or "analyst"
     if len(actor) > 120:
         raise ValueError("Actor must be 120 characters or fewer")
+    clean_reason = str(reason or "").strip()
+    if len(clean_reason) > 1000:
+        raise ValueError("Transition reason must be 1000 characters or fewer")
     with connect(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = _require_case(conn, case_id)
         current = row["state"]
         if target not in ALLOWED.get(current, set()):
             raise ValueError(f"Invalid transition: {current} -> {target}")
-        detail = transition_detail(current, target, reason)
+
+        paused_at = row["sla_paused_at"]
+        paused_seconds = max(0, int(row["sla_paused_seconds"] or 0))
+        was_paused = current in PAUSED_STATES
+        will_pause = target in PAUSED_STATES
+
+        if was_paused and not will_pause:
+            if paused_at:
+                started = datetime.fromisoformat(str(paused_at).replace("Z", "+00:00"))
+                paused_seconds += max(
+                    0,
+                    int((datetime.fromisoformat(now) - started).total_seconds()),
+                )
+            paused_at = None
+        elif not was_paused and will_pause:
+            paused_at = now
+        elif was_paused and will_pause and not paused_at:
+            paused_at = now
+
         conn.execute(
-            "UPDATE cases SET state=?, updated_at=? WHERE case_id=?",
-            (target, now, case_id),
+            """
+            UPDATE cases
+            SET state=?, updated_at=?, sla_paused_at=?, sla_paused_seconds=?
+            WHERE case_id=?
+            """,
+            (target, now, paused_at, paused_seconds, case_id),
         )
+        detail = f"{current} -> {target}"
+        if clean_reason:
+            detail += f" | reason: {clean_reason}"
         conn.execute(
             "INSERT INTO case_audit(case_id,actor,action,detail,timestamp) VALUES(?,?,?,?,?)",
             (case_id, actor, "state-transition", detail, now),
@@ -303,6 +370,37 @@ def add_case_note(
         return int(cur.lastrowid)
 
 
+def record_case_activity(
+    db_path: str | Path,
+    case_id: str,
+    *,
+    activity: str,
+    actor: str,
+    detail: str,
+) -> None:
+    allowed = {"escalation", "detection-feedback"}
+    clean_activity = str(activity or "").strip().lower()
+    if clean_activity not in allowed:
+        raise ValueError(f"Unsupported case activity: {clean_activity}")
+    clean_actor = str(actor or "").strip() or "analyst"
+    clean_detail = str(detail or "").strip()
+    if not clean_detail:
+        raise ValueError("Activity detail cannot be empty")
+    if len(clean_actor) > 120:
+        raise ValueError("Actor must be 120 characters or fewer")
+    if len(clean_detail) > 5000:
+        raise ValueError("Activity detail must be 5000 characters or fewer")
+    now = datetime.now(timezone.utc).isoformat()
+    action = "escalated" if clean_activity == "escalation" else "detection-feedback-recorded"
+    with connect(db_path) as conn:
+        _require_case(conn, case_id)
+        conn.execute(
+            "INSERT INTO case_audit(case_id,actor,action,detail,timestamp) VALUES(?,?,?,?,?)",
+            (case_id, clean_actor, action, clean_detail, now),
+        )
+        conn.commit()
+
+
 def case_detail(db_path: str | Path, case_id: str) -> dict:
     with connect(db_path) as conn:
         case = dict(_require_case(conn, case_id))
@@ -320,6 +418,7 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 (case_id,),
             ).fetchall()
         ]
+        state_history = state_history_from_audit(audit)
         alerts = [
             dict(row)
             for row in conn.execute(
@@ -342,7 +441,42 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 item["correlation_reasons"] = json.loads(item["correlation_reasons"])
             except (TypeError, json.JSONDecodeError):
                 item["correlation_reasons"] = []
-    return {"case": case, "notes": notes, "audit": audit, "alerts": alerts, "allowed_transitions": sorted(ALLOWED.get(case["state"], set()))}
+        collections = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT * FROM evidence_collections
+                WHERE case_id=?
+                ORDER BY started_at DESC
+                """,
+                (case_id,),
+            ).fetchall()
+        ]
+        for item in collections:
+            try:
+                item["query"] = json.loads(item.pop("query_json"))
+            except (TypeError, json.JSONDecodeError):
+                item["query"] = {}
+        requirements = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT * FROM evidence_requirements
+                WHERE case_id=?
+                ORDER BY created_at ASC
+                """,
+                (case_id,),
+            ).fetchall()
+        ]
+    return {
+        "case": case,
+        "notes": notes,
+        "audit": audit,
+        "state_history": state_history,
+        "alerts": alerts,
+        "evidence_collections": collections,
+        "evidence_requirements": requirements,
+    }
 
 
 def list_cases(
@@ -388,10 +522,15 @@ def command_center_snapshot(
 ) -> dict:
     all_cases = list_cases(db_path)
     cases = list_cases(db_path, query=query, priority=priority, state=state, owner=owner)
-    active_all = [c for c in all_cases if c.state not in {"resolved", "false-positive"}]
+    active_all = [c for c in all_cases if c.state not in CLOSED_STATES]
     breached = []
     for case in active_all:
-        status = evaluate_sla(case.opened_at, priority=case.priority)
+        status = evaluate_sla(
+            case.opened_at,
+            priority=case.priority,
+            paused_seconds=case.sla_paused_seconds,
+            paused_at=case.sla_paused_at,
+        )
         if status.breached:
             breached.append(case.case_id)
 
@@ -414,9 +553,33 @@ def command_center_snapshot(
         closed = datetime.fromisoformat(case.updated_at.replace("Z", "+00:00"))
         mttr_values.append(max(0, int((closed - opened).total_seconds() // 60)))
 
-    active_filtered = [c for c in cases if c.state not in {"resolved", "false-positive"}]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with connect(db_path) as conn:
+        requirement_rows = conn.execute(
+            """
+            SELECT case_id,status,due_at
+            FROM evidence_requirements
+            WHERE status IN ('required','requested')
+            """
+        ).fetchall()
+    requirement_counts: dict[str, dict[str, int]] = {}
+    for row in requirement_rows:
+        bucket = requirement_counts.setdefault(
+            str(row["case_id"]),
+            {"open": 0, "overdue": 0},
+        )
+        bucket["open"] += 1
+        if row["due_at"] and str(row["due_at"]) < now_iso:
+            bucket["overdue"] += 1
+
+    active_filtered = [c for c in cases if c.state not in CLOSED_STATES]
     sla_by_case = {
-        c.case_id: evaluate_sla(c.opened_at, priority=c.priority)
+        c.case_id: evaluate_sla(
+            c.opened_at,
+            priority=c.priority,
+            paused_seconds=c.sla_paused_seconds,
+            paused_at=c.sla_paused_at,
+        )
         for c in active_filtered
     }
 
@@ -428,6 +591,7 @@ def command_center_snapshot(
             "p1_active": sum(1 for c in active_all if c.priority == "P1"),
             "unassigned": sum(1 for c in active_all if not c.owner),
             "sla_breached": len(breached),
+            "sla_paused": sum(1 for c in active_all if c.state in PAUSED_STATES),
             "resolved": len(resolved),
             "mtta_minutes": round(sum(mtta_values) / len(mtta_values), 1) if mtta_values else None,
             "mttr_minutes": round(sum(mttr_values) / len(mttr_values), 1) if mttr_values else None,
@@ -450,9 +614,15 @@ def command_center_snapshot(
                 "updated_at": c.updated_at,
                 "acknowledged_at": c.acknowledged_at,
                 "has_evidence": bool(c.evidence_path),
+                "evidence_requirements": requirement_counts.get(
+                    c.case_id,
+                    {"open": 0, "overdue": 0},
+                ),
                 "sla": {
                     "breached": sla_by_case[c.case_id].breached,
                     "remaining_minutes": sla_by_case[c.case_id].remaining_minutes,
+                    "paused": sla_by_case[c.case_id].paused,
+                    "paused_minutes": sla_by_case[c.case_id].paused_minutes,
                 } if c.case_id in sla_by_case else None,
             }
             for c in cases

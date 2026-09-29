@@ -1,0 +1,2 @@
+{"id": "linux-ssh-privilege-escalation-0", "timestamp": "2026-09-28T13:09:00+00:00", "agent": {"name": "LINUX-01"}, "rule": {"id": "scenario-2", "level": 8, "description": "linux-ssh-privilege-escalation"}, "data": {"srcuser": "root", "srcip": "198.51.100.25"}}
+{"id": "linux-ssh-privilege-escalation-1", "timestamp": "2026-09-28T13:09:01+00:00", "agent": {"name": "LINUX-01"}, "rule": {"id": "scenario-2", "level": 13, "description": "linux-ssh-privilege-escalation"}, "data": {"srcuser": "root", "srcip": "198.51.100.25"}}

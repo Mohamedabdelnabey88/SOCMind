@@ -114,7 +114,24 @@ socmind alert-orchestrate elastic alerts.ndjson \
   --evidence-dir /var/lib/socmind/evidence
 ```
 
-Live pull is also available without an intermediate export:
+The correlation decision is deterministic, configurable, concurrency-safe, and records the exact reasons each alert was attached to a case.
+
+### Milestone 2 — Live Evidence Collector
+
+Once alerts are linked to a case, SOCMind can derive the case context and pull surrounding telemetry directly from Elastic or Wazuh Indexer:
+
+```bash
+export ELASTIC_API_KEY='...'
+
+socmind case-collect-evidence INC-2026-001 \
+  elastic https://elastic.internal:9200 'logs-*' \
+  --database socmind.db \
+  --evidence-dir evidence
+```
+
+The pull is journaled with its provider, index, query, time window, status and event count. Results are normalized and merged into the case evidence package, and collection history is visible in the Case Workspace.
+
+Direct live alert pull is also available:
 
 ```bash
 socmind alert-live elastic https://elastic:9200 \
@@ -126,7 +143,37 @@ socmind alert-live wazuh-indexer https://wazuh-indexer:9200 \
   --database socmind.db --json
 ```
 
-The same orchestration core is used for file and live ingestion. The correlation decision is deterministic, configurable, concurrency-safe, and records the exact reasons each alert was attached to a case.
+Both live and file ingestion use the same deterministic orchestration engine.
+
+### Milestone 3 — Evidence Requirements
+
+SOCMind can turn investigation validation gaps into explicit requirements such as IdP/MFA context, VPN history, parent-process ancestry, host scope, and change-control evidence.
+
+```text
+required → requested → received
+          ↘ unavailable → requested / received / waived
+required ─────────────────────────────→ waived
+```
+
+Missing evidence is tracked as an operational dependency; it is not treated as contradicting evidence. Received requirements require an evidence reference, while unavailable/waived states require a documented reason. Requirement operations are permission-controlled and audited in both SQLite and PostgreSQL.
+
+Case state transitions also expose structured history with actor, timestamp and transition reason.
+
+### Milestone 4 — Unified Case Timeline
+
+Case Workspace now merges alert receipt/correlation, case creation, evidence and detection events, evidence collection, acknowledgement, assignment, notes, state changes, containment, resolution, escalation and detection feedback into one ordered operational timeline.
+
+Every timeline entry has canonical `timestamp`, `type`, `source`, `actor` and `detail` fields. Escalation and detection feedback are persisted permission-controlled actions rather than inferred UI labels.
+
+### Detection Rule Lifecycle
+
+Detection rules can now move through a governed lifecycle:
+
+```text
+experimental → testing → approved → production → deprecated → retired
+```
+
+The lifecycle registry records rule version, owner, change notes, ATT&CK mapping, syntax status, regression results, confirmed-incident replay results, false-positive history and coverage deltas. Promotion is explicitly human-controlled: rules cannot be approved until required validation evidence exists, and only Lead/Admin authority can approve or promote to production.
 
 Detailed guide: [Production SOC Operations](docs/production-soc-operations.md)
 
@@ -183,6 +230,22 @@ socmind web events.jsonl \
 ```
 
 Identity is mapped to RBAC roles and mutating actions use the authenticated subject as the audit actor. Trusted-proxy signatures include a short-lived timestamp; the authenticating proxy must strip client-supplied `X-SOCMind-*` identity headers and generate fresh signed headers itself.
+
+### Native OIDC / SSO
+
+SOCMind can authenticate analysts directly through a generic OpenID Connect provider using Authorization Code + PKCE S256 while preserving the existing local-token and trusted-proxy modes.
+
+```bash
+export SOCMIND_OIDC_ISSUER='https://idp.example.com'
+export SOCMIND_OIDC_CLIENT_ID='socmind-client'
+export SOCMIND_OIDC_REDIRECT_URI='https://socmind.example.com/auth/callback'
+export SOCMIND_OIDC_SESSION_SECRET='replace-with-a-long-random-secret'
+export SOCMIND_OIDC_ROLE_MAP='{"SOC-T1":"analyst","SOC-T2":"senior-analyst","SOC-Leads":"lead","SOC-Admins":"admin"}'
+
+socmind web events.jsonl --auth-mode oidc --host 0.0.0.0
+```
+
+OIDC client secrets, when required by the provider, are read from `SOCMIND_OIDC_CLIENT_SECRET` and are not stored in the repository. Provider-specific live interoperability still depends on the deployment tenant/configuration.
 
 ### Tamper-evident audit
 
@@ -825,7 +888,7 @@ The initial portfolio roadmap is complete through **v1.2**. **v1.3** adds SOCMin
 
 v1.5 adds the enterprise foundation: RBAC, trusted-proxy identity, PostgreSQL case storage, tamper-evident audit, backup and retention tooling.
 
-v1.6 begins Production SOC Operations with idempotent Wazuh/Elastic alert orchestration, explainable active-case correlation, evidence-window collection, priority escalation, concurrency-safe SQLite/PostgreSQL ingestion, and an auditable Alert Chain / unified case timeline.
+v1.6 adds production alert orchestration: idempotent Wazuh/Elastic alert ingestion, explainable active-case correlation, evidence-window collection, priority escalation, concurrency-safe SQLite/PostgreSQL decisions, an auditable Alert Chain, and a unified operational case timeline.
 
 Future expansion remains organization-specific:
 

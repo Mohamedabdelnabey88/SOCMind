@@ -106,9 +106,54 @@ socmind trusted-sign \
   --role analyst
 ```
 
-This is a **trusted reverse-proxy integration mode**, not a replacement for an identity provider. Production environments should terminate identity at an authenticating proxy or gateway backed by the organization's SSO/OIDC/SAML solution.
+This is a **trusted reverse-proxy integration mode**, not a replacement for an identity provider. Production environments may continue using it when identity is terminated upstream.
 
 The proxy must strip any client-supplied `X-SOCMind-*` identity headers and generate fresh signed headers itself. The signing secret must never be exposed to analyst browsers.
+
+### Native OIDC / SSO
+
+SOCMind also supports a native generic OpenID Connect mode using Authorization Code + PKCE S256.
+
+Required environment variables:
+
+```bash
+export SOCMIND_OIDC_ISSUER='https://idp.example.com/tenant/v2.0'
+export SOCMIND_OIDC_CLIENT_ID='socmind-client-id'
+export SOCMIND_OIDC_REDIRECT_URI='https://socmind.example.com/auth/callback'
+export SOCMIND_OIDC_SESSION_SECRET='replace-with-at-least-32-random-characters'
+```
+
+For confidential clients, provide the client secret only through the environment:
+
+```bash
+export SOCMIND_OIDC_CLIENT_SECRET='...'
+```
+
+Role mapping is a JSON object whose keys are claim values and whose values are SOCMind roles:
+
+```bash
+export SOCMIND_OIDC_ROLE_CLAIM='groups'
+export SOCMIND_OIDC_ROLE_MAP='{
+  "SOC-T1":"analyst",
+  "SOC-T2":"senior-analyst",
+  "SOC-Leads":"lead",
+  "SOC-Admins":"admin"
+}'
+```
+
+Launch:
+
+```bash
+socmind web events.jsonl \
+  --auth-mode oidc \
+  --host 0.0.0.0
+```
+
+SOCMind discovers the provider endpoints from the configured issuer and validates the ID token signature via JWKS plus issuer, audience, expiry and nonce. The browser receives only a bounded HttpOnly SOCMind session cookie after validation.
+
+HTTPS is required for issuer, provider endpoints and callback URI. `--oidc-allow-insecure-http` only permits loopback HTTP for local development.
+
+The implementation is generic and designed for standards-compatible providers such as Microsoft Entra ID, Keycloak and Okta. CI validates protocol behavior with cryptographic local fixtures; it does not claim live interoperability testing against a specific tenant/provider without provider credentials.
 
 ## PostgreSQL case store
 

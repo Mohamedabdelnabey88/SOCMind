@@ -1,5 +1,5 @@
 from .auditd import parse_auditd
-from .elastic import parse_elastic_ndjson, elastic_search_hits_to_events
+from .elastic import parse_elastic_ndjson, parse_elastic_hits
 from .evtx import parse_evtx
 from .journald import parse_journald_json
 from .linux_auth import parse_auth_log
@@ -9,7 +9,7 @@ from .windows_xml import parse_windows_event_xml
 __all__ = [
     "parse_auditd",
     "parse_elastic_ndjson",
-    "elastic_search_hits_to_events",
+    "parse_elastic_hits",
     "parse_evtx",
     "parse_journald_json",
     "parse_auth_log",

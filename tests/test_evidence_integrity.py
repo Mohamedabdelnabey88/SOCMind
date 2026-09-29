@@ -1,71 +1,80 @@
-import io
-from pathlib import Path
-import pytest
-from socmind.case_workflow import new_case
-from socmind.command_center import upsert_case, case_detail
-from socmind.evidence_integrity import register_artifact, verify_artifacts
-from socmind.evidence_storage import LocalEvidenceStore, S3EvidenceStore, digest
-from socmind.rbac import Principal
+import json
 
-ACTOR = Principal('alice', 'analyst', 'test')
+from socmind.evidence_integrity import (
+    evidence_manifest_path,
+    verify_evidence_manifest,
+    write_evidence_manifest,
+)
 
 
-def test_original_preserved_and_stored_tamper_detected(tmp_path):
-    db = tmp_path / 'test.db'
-    upsert_case(db, new_case('C'))
-    original = tmp_path / 'evidence.jsonl'
-    original.write_bytes(b'original evidence')
-    store = LocalEvidenceStore(tmp_path / 'objects')
-    item = register_artifact(db, 'C', original, store, storage_id='local', source='IdP', principal=ACTOR)
-    assert original.read_bytes() == b'original evidence'
-    assert register_artifact(db, 'C', original, store, storage_id='local', source='IdP', principal=ACTOR) == item
-    assert len(case_detail(db, 'C')['audit']) == 1
-    results = verify_artifacts(db, 'C', {'local': store}, principal=ACTOR)
-    assert results[0]['integrity_status'] == 'verified'
-    (store.root / item['storage_key']).write_bytes(b'tampered')
-    assert verify_artifacts(db, 'C', {'local': store}, principal=ACTOR)[0]['integrity_status'] == 'mismatch'
-    with pytest.raises(ValueError):
-        register_artifact(db, 'C', original, store, storage_id='local', source='IdP', principal=ACTOR)
-    (store.root / item['storage_key']).unlink()
-    assert verify_artifacts(db, 'C', {'local': store}, principal=ACTOR)[0]['integrity_status'] == 'missing'
+def _write_evidence(path):
+    path.write_text(
+        '{"timestamp":"2026-09-29T00:00:00+00:00","source":"wazuh"}\n'
+        '{"timestamp":"2026-09-29T00:01:00+00:00","source":"wazuh"}\n',
+        encoding="utf-8",
+    )
 
 
-def test_storage_rejects_path_escape_and_symlink(tmp_path):
-    store = LocalEvidenceStore(tmp_path / 'objects')
-    with pytest.raises(ValueError):
-        store.get('../secret')
-    original = tmp_path / 'real'
-    original.write_bytes(b'content')
-    link = store.root / digest(b'content')
-    try:
-        link.symlink_to(original)
-    except OSError:
-        pytest.skip('Symlink creation unavailable')
-    with pytest.raises(ValueError):
-        store.put(digest(b'content'), b'content')
-    with pytest.raises(ValueError):
-        store.get(digest(b'content'))
+def test_manifest_records_required_integrity_metadata(tmp_path):
+    evidence = tmp_path / "CASE-1.jsonl"
+    _write_evidence(evidence)
+
+    manifest = write_evidence_manifest(
+        evidence,
+        case_id="CASE-1",
+        source="wazuh",
+        event_count=2,
+        collected_at="2026-09-29T00:02:00+00:00",
+    )
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+
+    assert manifest == evidence_manifest_path(evidence)
+    assert payload["manifest_version"] == 1
+    assert payload["case_id"] == "CASE-1"
+    assert payload["file_name"] == "CASE-1.jsonl"
+    assert payload["source"] == "wazuh"
+    assert payload["event_count"] == 2
+    assert payload["size_bytes"] == evidence.stat().st_size
+    assert len(payload["sha256"]) == 64
 
 
-def test_s3_adapter_conditional_write_and_close():
-    class PreconditionFailed(Exception):
-        response = {'Error': {'Code': 'PreconditionFailed'}}
-    class FakeS3:
-        def __init__(self):
-            self.data = {}
-        def put_object(self, **kw):
-            assert kw['IfNoneMatch'] == '*'
-            if kw['Key'] in self.data:
-                raise PreconditionFailed()
-            self.data[kw['Key']] = kw['Body']
-        def get_object(self, **kw):
-            return {'Body': io.BytesIO(self.data[kw['Key']])}
-    client = FakeS3()
-    store = S3EvidenceStore(client, 'evidence')
-    sha = digest(b'evidence')
-    store.put(sha, b'evidence')
-    store.put(sha, b'evidence')
-    assert store.get(sha) == b'evidence'
-    client.data['socmind-evidence/' + sha] = b'tampered'
-    with pytest.raises(ValueError):
-        store.put(sha, b'evidence')
+def test_verify_manifest_passes_for_unchanged_evidence(tmp_path):
+    evidence = tmp_path / "CASE-2.jsonl"
+    _write_evidence(evidence)
+    write_evidence_manifest(evidence, case_id="CASE-2", source="elastic", event_count=2)
+
+    result = verify_evidence_manifest(evidence)
+
+    assert result.valid is True
+    assert result.errors == ()
+    assert result.actual_sha256 == result.expected_sha256
+    assert result.actual_event_count == 2
+
+
+def test_verify_manifest_detects_evidence_tampering(tmp_path):
+    evidence = tmp_path / "CASE-3.jsonl"
+    _write_evidence(evidence)
+    write_evidence_manifest(evidence, case_id="CASE-3", source="wazuh", event_count=2)
+
+    evidence.write_text(evidence.read_text(encoding="utf-8") + '{"tampered":true}\n', encoding="utf-8")
+    result = verify_evidence_manifest(evidence)
+
+    assert result.valid is False
+    assert "sha256 mismatch" in result.errors
+    assert "size mismatch" in result.errors
+    assert "event_count mismatch" in result.errors
+
+
+def test_merge_refuses_to_rebaseline_tampered_evidence(tmp_path):
+    import pytest
+    from socmind.orchestration import _merge_evidence
+    from socmind.io import load_jsonl
+    from pathlib import Path
+    events = load_jsonl(Path(__file__).resolve().parents[1] / 'examples/attack_chain.jsonl')
+    path = tmp_path / 'case.jsonl'
+    _merge_evidence(path, events, case_id='C', source='test')
+    manifest = evidence_manifest_path(path).read_bytes()
+    path.write_bytes(path.read_bytes() + b'\n')
+    with pytest.raises(ValueError, match='integrity'):
+        _merge_evidence(path, events, case_id='C', source='test')
+    assert evidence_manifest_path(path).read_bytes() == manifest

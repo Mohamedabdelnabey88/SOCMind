@@ -44,38 +44,42 @@ socmind alert-orchestrate elastic elastic-alerts.ndjson \
   --json
 ```
 
-## Live alert pull
+## Live alert ingestion
 
-Elastic Security alert alias:
+SOCMind can pull active alerts directly from an Elasticsearch-compatible search API and immediately feed them into the same idempotent orchestration pipeline used by file ingestion.
+
+### Elastic Security
 
 ```bash
 export ELASTIC_API_KEY='...'
 
-socmind alert-live elastic https://elastic:9200 \
+socmind alert-live elastic https://elastic.internal:9200 \
   .alerts-security.alerts-default \
   --database socmind.db \
   --evidence-dir socmind-evidence \
   --json
 ```
 
-Wazuh Indexer:
+The parser understands current Elastic Security alert metadata including `kibana.alert.rule.*`, `kibana.alert.severity`, `kibana.alert.risk_score`, and ATT&CK technique metadata.
+
+### Wazuh Indexer
 
 ```bash
-export WAZUH_INDEXER_USERNAME='...'
+export WAZUH_INDEXER_USER='...'
 export WAZUH_INDEXER_PASSWORD='...'
 
-socmind alert-live wazuh-indexer https://wazuh-indexer:9200 \
+socmind alert-live wazuh-indexer https://wazuh-indexer.internal:9200 \
   'wazuh-alerts*' \
   --database socmind.db \
   --evidence-dir socmind-evidence \
   --json
 ```
 
-JWT is also supported through `WAZUH_INDEXER_JWT`.
+`WAZUH_INDEXER_JWT` is also supported. Wazuh Indexer credentials are isolated from Elastic credentials.
 
-The live path queries the search API and feeds returned hits directly into the same duplicate/correlation/case/evidence pipeline used by file orchestration. No temporary export file is required.
+The live command requires no temporary export file. Returned search hits are normalized in memory and passed directly through duplicate detection, explainable correlation, case creation/attachment, priority escalation and evidence-window collection.
 
-TLS certificate verification is enabled by default. `--insecure` is intended only for controlled lab systems with self-signed certificates.
+TLS verification is enabled by default. `--insecure` is intended only for controlled lab environments.
 
 ## Correlation model
 
@@ -91,12 +95,9 @@ SOCMind currently scores explainable alert overlap using:
 
 Default merge threshold: `55`.
 
-The score alone does not trigger an automatic merge. SOCMind also applies a conservative context-anchor policy:
+The score alone does not trigger an automatic merge. Same-host correlation also requires shared user, process, source IP, or destination IP context; cross-host correlation requires multiple shared context anchors. Rule/ATT&CK similarity can strengthen a score but cannot justify automatic merging by itself.
 
-- same host must be accompanied by at least one shared user, process, source IP, or destination IP; or
-- cross-host correlation requires at least two shared context anchors among user, process, source IP, and destination IP.
-
-Rule/technique similarity can strengthen a correlation score, but by itself it cannot justify automatic case merging. This intentionally prefers a false split over a false merge when evidence is weak.
+Candidate lookup is bounded by the correlation time window and shared context before scoring, so unrelated alert floods do not hide relevant active cases.
 
 Default correlation time window: `15 minutes`.
 
@@ -108,8 +109,6 @@ Both are configurable:
 ```
 
 The score is deterministic correlation evidence. It is **not attacker attribution** and it is not a probability that two alerts share a root cause.
-
-Candidate lookup is bounded by both the correlation time window and shared context anchors before scoring. This avoids a global “last N alerts” scan and keeps relevant cases discoverable during unrelated alert floods.
 
 ## Outcomes
 
@@ -202,56 +201,416 @@ Those are subsequent v1.6 production-operations milestones.
 
 The current milestone establishes the case-orchestration core they can safely build on.
 
-## Advanced lifecycle (in progress)
+## Detection Rule Lifecycle
 
-The existing lifecycle now includes `waiting-for-evidence`, `waiting-for-user`,
-and `monitoring`. Waiting states return to triage/investigation; containment
-can progress to monitoring or return to investigation. Terminal states remain
-terminal. Waiting and monitoring require a nonempty reason. Existing transitions
-remain compatible with older CLI clients; the workspace requests a reason for
-all transitions. State audit entries retain actor, timestamp, old/new state and
-supplied reason in the same transaction as the update. SQLite uses BEGIN
-IMMEDIATE and PostgreSQL uses a row lock. Case detail advertises allowed next
-states; the workspace only offers those states.
+SOCMind supports a governed detection lifecycle:
 
-Use `socmind command-transition DB CASE --state waiting-for-evidence --reason
-"IdP logs requested" --actor lead` after triage. Timeline entries expose type,
-source and actor; timezone offsets are normalized to UTC for ordering.
+```text
+experimental
+  ↓
+testing
+  ↓
+approved
+  ↓
+production
+  ↓
+deprecated
+  ↓
+retired
+```
 
-This increment does not complete the remaining v1.6 milestones or authorize a
-final release. PostgreSQL regressions run in the PostgreSQL 16 CI job.
+A rule lifecycle record stores:
 
-## Evidence requirements API
+- rule ID and source path
+- semantic version
+- owner
+- created/updated timestamps
+- status
+- change notes
+- ATT&CK mapping
+- syntax validation status
+- regression fixture status
+- confirmed-incident replay results
+- false-positive history
+- coverage delta history
+- auditable lifecycle history
 
-`GET/POST /api/cases/{case_id}/requirements` lists or creates requirements.
-Creation accepts `label` and `origin`; repeated identical requirements are
-idempotent. `POST /api/cases/{case_id}/requirements/{requirement_id}` takes
-`state`, `reason`, optional `expected_state`, and `evidence_reference` when
-receiving evidence. States are required, requested, received, unavailable and
-waived. A waiver requires case.transition permission; ordinary requests require
-case.note. Missing/unavailable evidence is not fed into contradiction scoring.
-The Python `requirements_from_quality` adapter creates requirements from
-applicable, incomplete quality items. References are analyst assertions, not
-automatically verified artifact records. All changes are transactionally audited.
+The registry uses cross-platform file locking and atomic replacement. Registry targets and rule sources that are symlinks are rejected for mutation-sensitive operations.
 
-## Immutable evidence artifacts (initial implementation)
+Approval is gated. A rule cannot enter `approved` or `production` until SOCMind has recorded:
 
-`socmind evidence-register CASE path --database socmind.db --evidence-dir objects
---source IdP` copies a regular file into a content-addressed local store and
-records SHA-256, byte count, original name, collection time, collector, source,
-case and storage identifier. Repeated registration is idempotent. Original files
-are not overwritten. `socmind evidence-verify CASE --database socmind.db
---evidence-dir objects` reports verified, mismatch, missing or unavailable and
-returns exit code 1 on failed verification. Both accept `--postgres-dsn`.
+1. syntax validation PASS
+2. regression fixture PASS
+3. at least one confirmed-incident replay
+4. at least one false-positive observation
+5. at least one coverage delta measurement
 
-Artifacts are limited to 64 MiB per file. Local roots must be service-owned;
-symlinks are rejected. These hashes detect content changes, not a malicious
-administrator rewriting both metadata and data. The mutable orchestration
-working file remains separate; explicit registration creates an immutable
-snapshot. A failed metadata transaction can leave an unreferenced object;
-objects are never automatically deleted.
+Senior analysts may manage validation evidence. Lead/Admin authority is required for approval, deprecation and retirement, and Lead/Admin promotion authority is required for `production`.
 
-The SDK-independent EvidenceStore protocol includes local and injected-client
-S3 adapters. The S3 adapter requires conditional PutObject (`IfNoneMatch=*`),
-which prevents overwriting existing keys. Its unit tests use a simulated client;
-real S3/MinIO integration and deployment configuration remain release gates.
+SOCMind never auto-promotes a detection rule.
+
+Example:
+
+```bash
+socmind rule-register rule-registry.json detections/windows/suspicious-powershell.yml \
+  --owner detection-team --actor tier2@example.com --role senior-analyst
+
+socmind rule-transition rule-registry.json socmind-win-powershell-hidden \
+  --state testing --actor tier2@example.com --role senior-analyst \
+  --note "Begin validation"
+```
+
+The local CLI role is an explicit operator policy assertion, not an identity provider. Native OIDC/SSO is a separate v1.6 milestone.
+
+
+## Milestone 2 — Live Evidence Collector
+
+SOCMind can now use the alerts already linked to a case to build an auditable live evidence query against an Elasticsearch-compatible backend.
+
+Supported provider modes:
+
+- `elastic`
+- `wazuh-indexer` (Elasticsearch/OpenSearch-compatible Wazuh Indexer API)
+
+The collector derives:
+
+- earliest/latest linked-alert timestamp
+- configurable before/after collection window
+- hosts
+- users
+- processes
+- source IPs
+- destination IPs
+
+It then builds a bounded query and merges normalized results into the case evidence package.
+
+### Elastic
+
+```bash
+export ELASTIC_API_KEY='...'
+
+socmind case-collect-evidence INC-2026-001 \
+  elastic \
+  https://elastic.internal:9200 \
+  'logs-*' \
+  --database socmind.db \
+  --evidence-dir evidence
+```
+
+PostgreSQL:
+
+```bash
+export SOCMIND_POSTGRES_DSN='postgresql://socmind:password@db:5432/socmind'
+export ELASTIC_API_KEY='...'
+
+socmind case-collect-evidence INC-2026-001 \
+  elastic \
+  https://elastic.internal:9200 \
+  'logs-*' \
+  --postgres-dsn "$SOCMIND_POSTGRES_DSN" \
+  --evidence-dir /var/lib/socmind/evidence
+```
+
+### Wazuh Indexer
+
+```bash
+export WAZUH_INDEXER_USER='socmind'
+export WAZUH_INDEXER_PASSWORD='...'
+
+socmind case-collect-evidence INC-2026-001 \
+  wazuh-indexer \
+  https://wazuh-indexer.internal:9200 \
+  'wazuh-alerts-*' \
+  --database socmind.db \
+  --evidence-dir evidence
+```
+
+TLS verification is on by default. `--insecure` is intended only for controlled lab environments using self-signed certificates.
+
+### Collection journal
+
+Every live collection records:
+
+- collection ID
+- case ID
+- provider
+- source index/pattern
+- exact time window
+- exact generated query
+- started/completed timestamps
+- status
+- event count
+- provider error, if any
+
+Collection success/failure also appears in the case audit trail and the unified case timeline.
+
+Provider failure is never silently treated as an empty successful result.
+
+### Query semantics
+
+SOCMind uses the linked alerts as investigation context rather than issuing an unbounded search.
+
+The query always filters by the case alert time window and, when available, requires at least one matching identity signal from:
+
+- `host.name`
+- `user.name`
+- `process.name`
+- `process.executable`
+- `source.ip`
+- `destination.ip`
+
+This is evidence collection for investigation context. It is not an attribution engine and does not automatically determine case disposition.
+
+## Evidence integrity
+
+Every case evidence JSONL package written by alert orchestration or the live evidence collector now receives a sidecar manifest:
+
+```text
+<case-id>.jsonl.manifest.json
+```
+
+The manifest records:
+
+- manifest format version
+- case ID
+- evidence file name
+- SHA-256 digest
+- file size in bytes
+- collected timestamp
+- source/provider
+- event count
+
+Manifest generation happens while the per-case evidence lock is still held, so concurrent writers cannot silently leave a stale digest/event count after a completed merge.
+
+Verify a package with:
+
+```bash
+socmind evidence-verify socmind-evidence/INC-2026-001.jsonl
+```
+
+JSON output:
+
+```bash
+socmind evidence-verify socmind-evidence/INC-2026-001.jsonl --json
+```
+
+A mismatch in SHA-256, size, event count, file name, or manifest version returns an invalid result and the CLI exits non-zero.
+
+Case detail also exposes integrity state through:
+
+```text
+GET /api/cases/{case_id}
+GET /api/cases/{case_id}/evidence-integrity
+```
+
+The web Case Workspace surfaces the same state as `VALID`, `INVALID`, manifest missing, or unavailable.
+
+This provides tamper detection for the stored evidence package. It does **not** provide cryptographic signing, trusted timestamping, immutable/WORM storage, or proof of custody outside SOCMind; those require separate controls.
+
+## Milestone 3 — Evidence Requirements
+
+Validation gaps and unresolved investigation questions can now be promoted into explicit operational Evidence Requirements instead of being treated as contradictions.
+
+Requirement states:
+
+```text
+required
+  -> requested
+  -> received
+
+required/requested
+  -> unavailable
+
+required/requested/unavailable
+  -> waived
+```
+
+An unavailable requirement can be requested again later when a source becomes available. `received` and `waived` are terminal states.
+
+SOCMind currently derives deterministic suggestions for common gaps such as:
+
+- IdP authentication / MFA context
+- VPN and remote-access history
+- parent-process / execution ancestry
+- host scope
+- change-control / automation context
+- persistence creator / approval context
+
+Generation is analyst-triggered. SOCMind does not auto-waive, auto-close, or convert missing evidence into contradicting evidence.
+
+### Integrity and audit rules
+
+- `received` requires an evidence reference/URI.
+- `unavailable` requires a documented reason.
+- `waived` requires a documented reason and the `evidence.waive` permission.
+- creation and status changes are written to the case audit trail.
+- duplicate open requirements with the same case/key collapse to the existing requirement.
+- SQLite uses a partial unique index and conflict-safe insert semantics.
+- PostgreSQL uses the equivalent partial unique index with `ON CONFLICT DO NOTHING`.
+- open and overdue requirement counts are visible in the Command Center.
+
+### Permission model
+
+- viewer: read
+- analyst: read + create/request
+- senior analyst: read + create/request + manage received/unavailable
+- lead/admin: all above + waive
+
+Case detail includes `evidence_requirements`, and the web Case Workspace provides generated/manual requirement controls.
+
+## Milestone 4 — Unified Case Timeline
+
+SOCMind now builds a single deterministic operational timeline for each case from persisted case state plus linked investigation evidence.
+
+Every entry exposes:
+
+```text
+timestamp
+type
+source
+actor
+detail
+```
+
+The timeline currently normalizes:
+
+- evidence-event
+- detection-event
+- alert-received
+- case-created
+- alert-correlated
+- evidence-collected / evidence-collection-failed
+- analyst-acknowledged
+- assignment
+- note
+- evidence-requirement / evidence-requirement-updated
+- state-transition
+- containment
+- resolution / false-positive disposition
+- escalation
+- detection-feedback
+- fallback case-action for auditable operations that do not yet have a dedicated type
+
+Case creation vs alert correlation is determined from the persisted `alert-linked` audit payload rather than inferred from a score. Detection timestamps are derived from the last evidence event required to complete the finding.
+
+Analyst escalation and detection feedback are explicit persisted case activities. They are not inferred from exported files:
+
+- escalation requires `case.transition`
+- detection feedback requires `detection.review`
+
+Read the normalized timeline directly:
+
+```text
+GET /api/cases/{case_id}/timeline
+```
+
+The existing case-detail response also includes the same timeline under `case_timeline`.
+
+Entries are sorted in UTC-aware chronological order. Malformed legacy timestamps are handled safely instead of crashing the workspace. The legacy `kind` and `title` fields remain available for compatibility while `type/source/actor/detail` are the canonical operational fields.
+
+## Structured state history
+
+Operational case transitions now expose a dedicated `state_history` payload with:
+
+- from_state
+- to_state
+- actor
+- timestamp
+- reason
+- original audit detail
+
+The audit trail remains the source of record. The structured history is a normalized read model for analysts and API consumers.
+
+## Advanced case lifecycle
+
+SOCMind now supports a fuller operational lifecycle:
+
+```text
+new
+  -> triage
+  -> investigating
+  -> waiting-for-evidence
+  -> waiting-for-user
+  -> contained
+  -> monitoring
+  -> resolved / false-positive
+```
+
+Allowed transitions are intentionally constrained rather than permitting arbitrary state changes. Waiting cases can return to triage/investigating, move to monitoring when appropriate, or close when the investigation is complete. Contained cases can return to investigating if containment is not sufficient.
+
+### SLA pause/resume
+
+The operational SLA clock pauses only in:
+
+- `waiting-for-evidence`
+- `waiting-for-user`
+
+SOCMind persists both the active pause start and accumulated paused seconds. Moving between the two waiting states does not reset the pause. Leaving a waiting state atomically adds the elapsed pause interval to the accumulated total and resumes the SLA clock.
+
+This behavior is implemented consistently for:
+
+- standalone case JSON
+- SQLite Command Center
+- PostgreSQL enterprise case store
+- CLI SLA output
+- web Command Center / Case Workspace
+
+Existing SQLite/PostgreSQL stores are migrated in place with nullable/defaulted lifecycle columns. Older case JSON files remain loadable with zero accumulated pause.
+
+Waiting and monitoring cases remain active for alert correlation. Only `resolved` and `false-positive` cases are excluded from new alert attachment.
+
+The Command Center exposes both SLA breach count and paused-SLA count. A case that breached before entering a waiting state remains visibly `BREACHED · PAUSED`; pausing never erases a prior breach.
+
+## Object evidence snapshots
+
+Working evidence packages retain their existing manifest workflow. Before merging
+new events, SOCMind now verifies an existing manifest and refuses to re-baseline
+modified data. An interrupted evidence/manifest update fails closed and requires
+investigation; it is not silently accepted as valid.
+
+Immutable snapshots are a separate artifact API backed by SQLite or PostgreSQL
+metadata and a vendor-independent storage protocol. Register and verify:
+
+```bash
+socmind artifact-register CASE evidence.jsonl --database socmind.db \
+  --evidence-dir objects --source wazuh
+socmind artifact-verify CASE --database socmind.db --evidence-dir objects
+```
+
+For S3-compatible storage, install `socmind[storage]`, configure credentials using
+the SDK credential chain, then replace `--evidence-dir` with `--bucket BUCKET
+--endpoint https://objects.example --storage-id production-objects`. The core
+only depends on the put/get protocol. The optional adapter uses conditional
+writes to prevent overwriting an existing content key. Custom endpoints must
+use HTTPS and TLS verification stays enabled. MinIO requires compatible
+conditional-write support. No real provider deployment is claimed by unit tests.
+
+Metadata records SHA-256, size, original name, collection timestamp, collector,
+source, case and storage identifier. Verification reports verified, mismatch,
+missing or unavailable and exits nonzero on failed checks. Each artifact is
+limited to 64 MiB. Service-owned directories are required; symlinks are rejected.
+A failed metadata transaction may leave an unreferenced immutable object; no
+object is silently deleted. Verification detects byte changes, not an attacker
+who controls both the database and evidence store. Artifact registration is
+explicit and does not replace existing working-file investigation paths.
+
+## Reproducible scenario and load validation
+
+`examples/production-scenarios/manifest.json` describes six synthetic exercises:
+password spray/account compromise, Office/PowerShell/C2, Linux SSH/privilege
+escalation, scheduled-task persistence, benign administration and a multi-alert
+incident. Run `pytest -q tests/test_production_scenarios.py`. Tests exercise
+Wazuh/Elastic promotion, idempotency, correlation, evidence collection, findings,
+ATT&CK (where findings exist), contradiction review, quality gaps, assignments,
+notes, analyst-triggered escalation/disposition/feedback and artifact integrity.
+Missing quality items stay visible. Synthetic analyst actions are not automatic
+production closure or proof of real-world detection coverage. In particular,
+the spray scenario includes a targeted brute-force sequence; the current engine
+finds that sequence and does not claim a dedicated distributed-spray detector.
+
+Run `python scripts/benchmark_production_ops.py` from the repository root for
+local synthetic analysis and SQLite queue benchmarks. Measured output is in
+`docs/validation/production-ops-load-linux.json`, including CPU time, process
+peak RSS, 10k/100k/1M events, 100/1k/10k cases, in-process API latency and eight
+concurrent workers. API timing excludes networking/TLS; these are not production
+capacity guarantees or PostgreSQL scale measurements.

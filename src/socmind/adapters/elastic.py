@@ -22,7 +22,8 @@ def _ts(value: str | None) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def elastic_document_to_event(raw: dict) -> Event:
+def parse_elastic_hit(raw: dict) -> Event:
+    """Normalize one Elasticsearch/OpenSearch ECS hit into a SOCMind Event."""
     source = raw.get("_source") if isinstance(raw.get("_source"), dict) else raw
     return Event(
         timestamp=_ts(source.get("@timestamp")),
@@ -45,12 +46,16 @@ def elastic_document_to_event(raw: dict) -> Event:
         src_ip=_dig(source, "source", "ip"),
         dst_ip=_dig(source, "destination", "ip"),
         command_line=_dig(source, "process", "command_line"),
-        data={"ecs": source, "elastic_id": raw.get("_id")},
+        data={
+            "ecs": source,
+            "elastic_id": raw.get("_id"),
+            "elastic_index": raw.get("_index"),
+        },
     )
 
 
-def elastic_search_hits_to_events(hits: list[dict]) -> list[Event]:
-    return [elastic_document_to_event(hit) for hit in hits]
+def parse_elastic_hits(hits: list[dict]) -> list[Event]:
+    return [parse_elastic_hit(hit) for hit in hits if isinstance(hit, dict)]
 
 
 def parse_elastic_ndjson(path: str | Path) -> list[Event]:
@@ -59,5 +64,5 @@ def parse_elastic_ndjson(path: str | Path) -> list[Event]:
     for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
         if not line.strip():
             continue
-        events.append(elastic_document_to_event(json.loads(line)))
+        events.append(parse_elastic_hit(json.loads(line)))
     return events

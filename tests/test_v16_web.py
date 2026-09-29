@@ -69,6 +69,15 @@ def test_orchestrated_case_exposes_alert_chain_and_unified_timeline(tmp_path):
 
     assert len(payload["alerts"]) == 2
     assert payload["investigation"]["summary"]["events"] > 0
+    assert payload["evidence_integrity"]["available"] is True
+    assert payload["evidence_integrity"]["valid"] is True
+
+    integrity_response = client.get(
+        f"/api/cases/{first_result.case_id}/evidence-integrity"
+    )
+    assert integrity_response.status_code == 200
+    assert integrity_response.json()["valid"] is True
+
     timeline = payload["case_timeline"]
     assert timeline
 
@@ -81,6 +90,80 @@ def test_orchestrated_case_exposes_alert_chain_and_unified_timeline(tmp_path):
     alert_entries = [item for item in timeline if item["kind"] == "alert"]
     assert len(alert_entries) == 2
     assert any("correlation" in item["detail"] for item in alert_entries)
+
+    evidence_path = Path(first_result.evidence_path)
+    evidence_path.write_text(
+        evidence_path.read_text(encoding="utf-8") + '{"tampered":true}\n',
+        encoding="utf-8",
+    )
+    tampered = client.get(
+        f"/api/cases/{first_result.case_id}/evidence-integrity"
+    )
+    assert tampered.status_code == 200
+    tampered_payload = tampered.json()
+    assert tampered_payload["available"] is True
+    assert tampered_payload["valid"] is False
+    assert "sha256 mismatch" in tampered_payload["errors"]
+
+
+def test_web_case_lifecycle_exposes_paused_sla(tmp_path):
+    db = tmp_path / "soc.db"
+    evidence_dir = tmp_path / "evidence"
+    events_path = ROOT / "examples/attack_chain.jsonl"
+    events = load_jsonl(events_path)
+    base = events[0]
+
+    alert = AlertRecord(
+        "WEB-LIFECYCLE-001",
+        "wazuh",
+        base.timestamp,
+        "Lifecycle web alert",
+        8,
+        base.host,
+        user=base.user,
+        src_ip=base.src_ip,
+        rule_id="WEB-LIFE-1",
+    )
+    result = orchestrate_alert_sqlite(
+        db,
+        alert,
+        events,
+        evidence_dir=evidence_dir,
+    )
+
+    app = create_app(
+        events_path,
+        case_id=result.case_id,
+        command_db=db,
+        rules_dir=ROOT / "detections",
+    )
+    client = TestClient(app)
+
+    triage = client.post(
+        f"/api/cases/{result.case_id}/transition",
+        json={"state": "triage"},
+    )
+    assert triage.status_code == 200
+
+    waiting = client.post(
+        f"/api/cases/{result.case_id}/transition",
+        json={"state": "waiting-for-evidence"},
+    )
+    assert waiting.status_code == 200
+    payload = waiting.json()
+    assert payload["case"]["state"] == "waiting-for-evidence"
+    assert payload["case"]["sla_paused_at"] is not None
+
+    queue = client.get("/api/command-center").json()["queue"]
+    item = next(x for x in queue if x["case_id"] == result.case_id)
+    assert item["sla"]["paused"] is True
+
+    resume = client.post(
+        f"/api/cases/{result.case_id}/transition",
+        json={"state": "investigating"},
+    )
+    assert resume.status_code == 200
+    assert resume.json()["case"]["sla_paused_at"] is None
 
 
 def test_web_reports_v16_api_version():
