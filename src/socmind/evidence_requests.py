@@ -245,7 +245,7 @@ def update_request_sqlite(
     response_summary: str | None = None,
     evidence_reference: str | None = None,
     assigned_to: str | None = None,
-) -> None:
+) -> str:
     value = _validate_status(status)
     now = datetime.now(timezone.utc).isoformat()
     fulfilled = now if value == "fulfilled" else None
@@ -286,6 +286,7 @@ def update_request_sqlite(
             ),
         )
         conn.commit()
+        return str(row["case_id"])
 
 
 def create_request_pg(
@@ -377,7 +378,7 @@ def update_request_pg(
     response_summary: str | None = None,
     evidence_reference: str | None = None,
     assigned_to: str | None = None,
-) -> None:
+) -> str:
     value = _validate_status(status)
     now = datetime.now(timezone.utc)
     fulfilled = now if value == "fulfilled" else None
@@ -420,6 +421,7 @@ def update_request_pg(
                 ),
             )
         conn.commit()
+        return str(row["case_id"])
 
 
 def ensure_suggested_requests_sqlite(
