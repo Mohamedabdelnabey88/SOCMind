@@ -132,6 +132,25 @@ CREATE TABLE IF NOT EXISTS case_alerts (
   PRIMARY KEY(case_id, alert_id)
 );
 
+CREATE TABLE IF NOT EXISTS evidence_requests (
+  request_id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  source TEXT NOT NULL,
+  target TEXT,
+  rationale TEXT NOT NULL,
+  status TEXT NOT NULL,
+  requested_by TEXT NOT NULL,
+  assigned_to TEXT,
+  due_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  fulfilled_at TIMESTAMPTZ,
+  response_summary TEXT,
+  evidence_reference TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority, state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
 CREATE INDEX IF NOT EXISTS idx_notes_case ON case_notes(case_id, created_at);
@@ -139,4 +158,9 @@ CREATE INDEX IF NOT EXISTS idx_audit_case ON case_audit(case_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_host_user ON alerts(host, "user");
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_requests_case ON evidence_requests(case_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requests_status ON evidence_requests(status, due_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_requests_open_key
+ON evidence_requests(case_id, key)
+WHERE status IN ('pending','in-progress');
 """
