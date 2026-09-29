@@ -35,6 +35,8 @@ class CollectionResult:
     status: str
     fetched_events: int
     evidence_events: int
+    total_hits: int | None
+    truncated: bool
     evidence_path: str
     window_start: str
     window_end: str
@@ -132,8 +134,8 @@ def _start_sqlite_collection(db_path: str | Path, plan: CollectionPlan) -> str:
             """
             INSERT INTO evidence_collections(
               collection_id,case_id,provider,source_ref,window_start,window_end,
-              query_json,status,event_count,error,started_at,completed_at
-            ) VALUES(?,?,?,?,?,?,?,'running',0,NULL,?,NULL)
+              query_json,status,event_count,total_hits,truncated,error,started_at,completed_at
+            ) VALUES(?,?,?,?,?,?,?,'running',0,NULL,0,NULL,?,NULL)
             """,
             (
                 collection_id,
@@ -157,6 +159,8 @@ def _finish_sqlite_collection(
     case_id: str,
     status: str,
     event_count: int,
+    total_hits: int | None,
+    truncated: bool,
     evidence_path: str,
     error: str | None,
 ) -> None:
@@ -165,10 +169,18 @@ def _finish_sqlite_collection(
         conn.execute(
             """
             UPDATE evidence_collections
-            SET status=?,event_count=?,error=?,completed_at=?
+            SET status=?,event_count=?,total_hits=?,truncated=?,error=?,completed_at=?
             WHERE collection_id=?
             """,
-            (status, event_count, error, now, collection_id),
+            (
+                status,
+                event_count,
+                total_hits,
+                1 if truncated else 0,
+                error,
+                now,
+                collection_id,
+            ),
         )
         if status == "completed":
             conn.execute(
@@ -189,6 +201,8 @@ def _finish_sqlite_collection(
                         "collection_id": collection_id,
                         "status": status,
                         "event_count": event_count,
+                        "total_hits": total_hits,
+                        "truncated": truncated,
                         "error": error,
                     },
                     ensure_ascii=False,
@@ -209,8 +223,8 @@ def _start_pg_collection(dsn: str, plan: CollectionPlan) -> str:
                 """
                 INSERT INTO evidence_collections(
                   collection_id,case_id,provider,source_ref,window_start,window_end,
-                  query_json,status,event_count,error,started_at,completed_at
-                ) VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,'running',0,NULL,%s,NULL)
+                  query_json,status,event_count,total_hits,truncated,error,started_at,completed_at
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,'running',0,NULL,FALSE,NULL,%s,NULL)
                 """,
                 (
                     collection_id,
@@ -234,6 +248,8 @@ def _finish_pg_collection(
     case_id: str,
     status: str,
     event_count: int,
+    total_hits: int | None,
+    truncated: bool,
     evidence_path: str,
     error: str | None,
 ) -> None:
@@ -243,10 +259,18 @@ def _finish_pg_collection(
             cur.execute(
                 """
                 UPDATE evidence_collections
-                SET status=%s,event_count=%s,error=%s,completed_at=%s
+                SET status=%s,event_count=%s,total_hits=%s,truncated=%s,error=%s,completed_at=%s
                 WHERE collection_id=%s
                 """,
-                (status, event_count, error, now, collection_id),
+                (
+                    status,
+                    event_count,
+                    total_hits,
+                    truncated,
+                    error,
+                    now,
+                    collection_id,
+                ),
             )
             if status == "completed":
                 cur.execute(
@@ -267,6 +291,8 @@ def _finish_pg_collection(
                             "collection_id": collection_id,
                             "status": status,
                             "event_count": event_count,
+                            "total_hits": total_hits,
+                            "truncated": truncated,
                             "error": error,
                         },
                         ensure_ascii=False,
@@ -275,6 +301,26 @@ def _finish_pg_collection(
                 ),
             )
         conn.commit()
+
+
+def _search_total(response: dict, fetched: int) -> tuple[int | None, bool]:
+    total = response.get("hits", {}).get("total")
+    relation = None
+    if isinstance(total, dict):
+        relation = total.get("relation")
+        value = total.get("value")
+    else:
+        value = total
+    try:
+        total_hits = int(value) if value is not None else None
+    except (TypeError, ValueError):
+        total_hits = None
+
+    truncated = bool(
+        (total_hits is not None and total_hits > fetched)
+        or relation == "gte"
+    )
+    return total_hits, truncated
 
 
 def collect_case_evidence_sqlite(
@@ -309,6 +355,7 @@ def collect_case_evidence_sqlite(
         )
         hits = response.get("hits", {}).get("hits", [])
         events: list[Event] = parse_elastic_hits(hits)
+        total_hits, truncated = _search_total(response, len(events))
         evidence_count = _merge_evidence(Path(plan.evidence_path), events)
         _finish_sqlite_collection(
             db_path,
@@ -316,6 +363,8 @@ def collect_case_evidence_sqlite(
             case_id=case_id,
             status="completed",
             event_count=len(events),
+            total_hits=total_hits,
+            truncated=truncated,
             evidence_path=plan.evidence_path,
             error=None,
         )
@@ -327,6 +376,8 @@ def collect_case_evidence_sqlite(
             "completed",
             len(events),
             evidence_count,
+            total_hits,
+            truncated,
             plan.evidence_path,
             plan.window_start,
             plan.window_end,
@@ -338,6 +389,8 @@ def collect_case_evidence_sqlite(
             case_id=case_id,
             status="failed",
             event_count=0,
+            total_hits=None,
+            truncated=False,
             evidence_path=plan.evidence_path,
             error=str(exc)[:1000],
         )
@@ -377,6 +430,7 @@ def collect_case_evidence_postgres(
         )
         hits = response.get("hits", {}).get("hits", [])
         events: list[Event] = parse_elastic_hits(hits)
+        total_hits, truncated = _search_total(response, len(events))
         evidence_count = _merge_evidence(Path(plan.evidence_path), events)
         _finish_pg_collection(
             dsn,
@@ -384,6 +438,8 @@ def collect_case_evidence_postgres(
             case_id=case_id,
             status="completed",
             event_count=len(events),
+            total_hits=total_hits,
+            truncated=truncated,
             evidence_path=plan.evidence_path,
             error=None,
         )
@@ -395,6 +451,8 @@ def collect_case_evidence_postgres(
             "completed",
             len(events),
             evidence_count,
+            total_hits,
+            truncated,
             plan.evidence_path,
             plan.window_start,
             plan.window_end,
@@ -406,6 +464,8 @@ def collect_case_evidence_postgres(
             case_id=case_id,
             status="failed",
             event_count=0,
+            total_hits=None,
+            truncated=False,
             evidence_path=plan.evidence_path,
             error=str(exc)[:1000],
         )
