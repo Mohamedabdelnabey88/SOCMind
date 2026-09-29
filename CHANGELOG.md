@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Production SOC Operations — Milestone 2
+
+- validation-gap-driven evidence request suggestions
+- tracked evidence requests with assignment and due times
+- evidence request lifecycle: pending / in-progress / fulfilled / cancelled
+- idempotent suggested request creation
+- fulfilled response summaries and evidence references
+- advanced case states: waiting-for-evidence / waiting-for-user / monitoring
+- SQLite and PostgreSQL evidence request persistence
+- RBAC-protected evidence request APIs and web workflow
+- Command Center open/overdue evidence backlog metrics
+- evidence request events included in the unified case timeline
+- CLI workflow: `socmind evidence-suggest`
+
+
 ## 1.6.0 — Production SOC Operations — Milestone 1
 
 - Wazuh/Elastic alert promotion into operational SOC cases
