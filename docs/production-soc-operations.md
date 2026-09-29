@@ -346,6 +346,70 @@ The web Case Workspace surfaces the same state as `VALID`, `INVALID`, manifest m
 
 This provides tamper detection for the stored evidence package. It does **not** provide cryptographic signing, trusted timestamping, immutable/WORM storage, or proof of custody outside SOCMind; those require separate controls.
 
+## Milestone 3 — Evidence Requirements
+
+Validation gaps and unresolved investigation questions can now be promoted into explicit operational Evidence Requirements instead of being treated as contradictions.
+
+Requirement states:
+
+```text
+required
+  -> requested
+  -> received
+
+required/requested
+  -> unavailable
+
+required/requested/unavailable
+  -> waived
+```
+
+An unavailable requirement can be requested again later when a source becomes available. `received` and `waived` are terminal states.
+
+SOCMind currently derives deterministic suggestions for common gaps such as:
+
+- IdP authentication / MFA context
+- VPN and remote-access history
+- parent-process / execution ancestry
+- host scope
+- change-control / automation context
+- persistence creator / approval context
+
+Generation is analyst-triggered. SOCMind does not auto-waive, auto-close, or convert missing evidence into contradicting evidence.
+
+### Integrity and audit rules
+
+- `received` requires an evidence reference/URI.
+- `unavailable` requires a documented reason.
+- `waived` requires a documented reason and the `evidence.waive` permission.
+- creation and status changes are written to the case audit trail.
+- duplicate open requirements with the same case/key collapse to the existing requirement.
+- SQLite uses a partial unique index and conflict-safe insert semantics.
+- PostgreSQL uses the equivalent partial unique index with `ON CONFLICT DO NOTHING`.
+- open and overdue requirement counts are visible in the Command Center.
+
+### Permission model
+
+- viewer: read
+- analyst: read + create/request
+- senior analyst: read + create/request + manage received/unavailable
+- lead/admin: all above + waive
+
+Case detail includes `evidence_requirements`, and the web Case Workspace provides generated/manual requirement controls.
+
+## Structured state history
+
+Operational case transitions now expose a dedicated `state_history` payload with:
+
+- from_state
+- to_state
+- actor
+- timestamp
+- reason
+- original audit detail
+
+The audit trail remains the source of record. The structured history is a normalized read model for analysts and API consumers.
+
 ## Advanced case lifecycle
 
 SOCMind now supports a fuller operational lifecycle:
