@@ -5,6 +5,8 @@ import hmac
 import secrets
 import time
 from dataclasses import dataclass
+from http.cookies import SimpleCookie
+from typing import Any
 
 from .rbac import Principal, normalize_role
 
@@ -20,6 +22,8 @@ class AuthConfig:
     trusted_timestamp_header: str = "x-socmind-timestamp"
     trusted_signature_header: str = "x-socmind-signature"
     trusted_max_skew_seconds: int = 90
+    oidc_session_secret: str | None = None
+    oidc_session_cookie: str = "socmind_oidc_session"
 
 
 def _proxy_signature(
@@ -50,6 +54,28 @@ def authenticate(
             normalize_role(config.api_token_role, default="admin"),
             "local-token",
         )
+
+    if mode == "oidc":
+        secret = config.oidc_session_secret
+        if not secret:
+            raise PermissionError("OIDC authentication is not configured")
+        raw_cookie = headers.get("cookie", "")
+        cookie = SimpleCookie()
+        try:
+            cookie.load(raw_cookie)
+        except Exception as exc:
+            raise PermissionError("Invalid OIDC session cookie") from exc
+        morsel = cookie.get(config.oidc_session_cookie)
+        if morsel is None:
+            raise PermissionError("OIDC session is required")
+        from .oidc_auth import decode_signed_payload
+
+        payload = decode_signed_payload(morsel.value, secret)
+        subject = str(payload.get("sub") or "").strip()
+        if not subject:
+            raise PermissionError("OIDC session subject is missing")
+        role = normalize_role(str(payload.get("role") or "viewer"))
+        return Principal(subject, role, "oidc")
 
     if mode == "trusted-proxy":
         secret = config.trusted_proxy_secret
