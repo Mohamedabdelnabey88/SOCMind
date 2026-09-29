@@ -65,7 +65,7 @@ def _require_https(value: str, *, allow_insecure_http: bool) -> str:
 
 
 def normalize_issuer(issuer: str, *, allow_insecure_http: bool = False) -> str:
-    clean = str(issuer or "").strip().rstrip("/")
+    clean = str(issuer or "").strip()
     if not clean:
         raise ValueError("OIDC issuer is required")
     return _require_https(clean, allow_insecure_http=allow_insecure_http)
@@ -73,7 +73,7 @@ def normalize_issuer(issuer: str, *, allow_insecure_http: bool = False) -> str:
 
 def discovery_url(issuer: str, *, allow_insecure_http: bool = False) -> str:
     clean = normalize_issuer(issuer, allow_insecure_http=allow_insecure_http)
-    return clean + "/.well-known/openid-configuration"
+    return clean.rstrip("/") + "/.well-known/openid-configuration"
 
 
 def _json_request(
@@ -240,7 +240,11 @@ def new_authorization_transaction(
         "state": state,
         "nonce": nonce,
         "verifier": verifier,
-        "return_to": return_to if str(return_to).startswith("/") else "/",
+        "return_to": (
+            str(return_to)
+            if str(return_to).startswith("/") and not str(return_to).startswith("//")
+            else "/"
+        ),
         "exp": current + 600,
     }
     cookie = encode_signed_payload(transaction, config.session_secret)
