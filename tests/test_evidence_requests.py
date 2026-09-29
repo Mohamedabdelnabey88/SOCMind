@@ -1,9 +1,10 @@
 from pathlib import Path
 
 from socmind.case_workflow import new_case, transition
-from socmind.command_center import upsert_case
+from socmind.command_center import command_center_snapshot, upsert_case
 from socmind.evidence_requests import (
     create_request_sqlite,
+    ensure_suggested_requests_sqlite,
     list_requests_sqlite,
     suggest_evidence_requests,
     update_request_sqlite,
@@ -71,3 +72,68 @@ def test_sqlite_evidence_request_lifecycle(tmp_path):
     assert row["status"] == "fulfilled"
     assert row["fulfilled_at"]
     assert row["evidence_reference"] == "idp://session/123"
+
+
+def test_suggested_requests_are_idempotent_and_visible_in_queue(tmp_path):
+    db = tmp_path / "soc.db"
+    events_path = ROOT / "examples/attack_chain.jsonl"
+    events = load_jsonl(events_path)
+    upsert_case(
+        db,
+        new_case("INC-SUGGEST", priority="P1"),
+        evidence_path=events_path,
+    )
+
+    first = ensure_suggested_requests_sqlite(
+        db,
+        case_id="INC-SUGGEST",
+        events=events,
+        requested_by="tier2",
+        due_hours=4,
+    )
+    second = ensure_suggested_requests_sqlite(
+        db,
+        case_id="INC-SUGGEST",
+        events=events,
+        requested_by="tier2",
+        due_hours=4,
+    )
+    assert first == second
+    rows = list_requests_sqlite(db, "INC-SUGGEST")
+    assert len(rows) == len(set(first))
+
+    snapshot = command_center_snapshot(db)
+    queued = next(item for item in snapshot["queue"] if item["case_id"] == "INC-SUGGEST")
+    assert queued["evidence_requests"]["open"] == len(rows)
+    assert snapshot["summary"]["open_evidence_requests"] == len(rows)
+
+
+def test_evidence_request_terminal_states_cannot_reopen(tmp_path):
+    db = tmp_path / "soc.db"
+    upsert_case(db, new_case("INC-TERMINAL", priority="P2"))
+    request_id = create_request_sqlite(
+        db,
+        case_id="INC-TERMINAL",
+        key="process-ancestry",
+        title="Collect process ancestry",
+        source="endpoint",
+        target="host-1",
+        rationale="Validate execution lineage.",
+        requested_by="tier2",
+    )
+    update_request_sqlite(
+        db,
+        request_id,
+        status="fulfilled",
+        actor="tier2",
+        response_summary="Collected.",
+    )
+
+    import pytest
+    with pytest.raises(ValueError, match="Invalid evidence request transition"):
+        update_request_sqlite(
+            db,
+            request_id,
+            status="in-progress",
+            actor="tier2",
+        )
