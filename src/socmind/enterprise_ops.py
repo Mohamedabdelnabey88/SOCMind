@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS case_audit (
 
 CREATE TABLE IF NOT EXISTS alerts (
   alert_id TEXT PRIMARY KEY,
+  source_alert_id TEXT,
   source TEXT NOT NULL,
   timestamp TIMESTAMPTZ NOT NULL,
   title TEXT NOT NULL,
@@ -127,6 +128,9 @@ CREATE TABLE IF NOT EXISTS alerts (
   raw_reference TEXT,
   created_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS source_alert_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_alert_source_identity ON alerts(source,source_alert_id);
 
 CREATE TABLE IF NOT EXISTS case_alerts (
   case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,

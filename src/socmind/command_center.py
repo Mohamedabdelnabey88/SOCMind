@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS case_audit (
 );
 CREATE TABLE IF NOT EXISTS alerts (
     alert_id TEXT PRIMARY KEY,
+    source_alert_id TEXT,
     source TEXT NOT NULL,
     timestamp TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -183,6 +184,11 @@ def connect(path: str | Path) -> sqlite3.Connection:
     _retry_locked(configure_journal)
     conn.execute("PRAGMA synchronous=NORMAL")
     _retry_locked(lambda: conn.executescript(SCHEMA))
+    conn.execute("BEGIN IMMEDIATE")
+    alert_columns = {row[1] for row in conn.execute("PRAGMA table_info(alerts)")}
+    if "source_alert_id" not in alert_columns:
+        conn.execute("ALTER TABLE alerts ADD COLUMN source_alert_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_source_identity ON alerts(source,source_alert_id)")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
     for name, sql_type in {
         "acknowledged_at": "TEXT",
@@ -437,6 +443,7 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
             ).fetchall()
         ]
         for item in alerts:
+            item["alert_id"] = item.get("source_alert_id") or item["alert_id"]
             try:
                 item["correlation_reasons"] = json.loads(item["correlation_reasons"])
             except (TypeError, json.JSONDecodeError):

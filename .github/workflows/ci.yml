@@ -237,10 +237,19 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[storage]" pytest
+      - name: Checkout pinned public MinIO source
+        run: git clone --depth 1 --branch RELEASE.2025-09-06T17-38-46Z https://github.com/minio/minio.git "$RUNNER_TEMP/minio-source"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ runner.temp }}/minio-source/go.mod
+          cache: false
+      - name: Build isolated test server
+        working-directory: ${{ runner.temp }}/minio-source
+        run: go build -o "$RUNNER_TEMP/socmind-minio" .
       - name: Start isolated HTTPS MinIO
         shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/socmind-minio-certs"
+          mkdir -p "$RUNNER_TEMP/socmind-minio-certs" "$RUNNER_TEMP/socmind-minio-data"
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
             -keyout "$RUNNER_TEMP/socmind-minio-certs/private.key" \
             -out "$RUNNER_TEMP/socmind-minio-certs/public.crt" \
@@ -252,19 +261,23 @@ jobs:
           echo "AWS_DEFAULT_REGION=us-east-1" >> "$GITHUB_ENV"
           echo "AWS_CA_BUNDLE=$RUNNER_TEMP/socmind-minio-certs/public.crt" >> "$GITHUB_ENV"
           echo "SOCMIND_TEST_S3_ENDPOINT=https://localhost:9000" >> "$GITHUB_ENV"
-          docker run -d --name socmind-minio -p 127.0.0.1:9000:9000 \
-            -e MINIO_ROOT_USER=socmind-ci -e MINIO_ROOT_PASSWORD="$storage_test_password" \
-            -v "$RUNNER_TEMP/socmind-minio-certs:/certs:ro" \
-            quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z server /data --certs-dir /certs
+          MINIO_ROOT_USER=socmind-ci MINIO_ROOT_PASSWORD="$storage_test_password" \
+            "$RUNNER_TEMP/socmind-minio" server "$RUNNER_TEMP/socmind-minio-data" \
+            --address 127.0.0.1:9000 --certs-dir "$RUNNER_TEMP/socmind-minio-certs" \
+            > "$RUNNER_TEMP/socmind-minio.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/socmind-minio.pid"
           for attempt in $(seq 1 30); do
             if curl --fail --silent --cacert "$RUNNER_TEMP/socmind-minio-certs/public.crt" https://localhost:9000/minio/health/ready; then
               exit 0
             fi
             sleep 1
           done
-          docker logs socmind-minio
+          cat "$RUNNER_TEMP/socmind-minio.log"
           exit 1
       - run: pytest -q tests/test_object_storage_integration.py
       - name: Stop isolated test service
         if: always()
-        run: docker rm -f socmind-minio
+        run: |
+          if test -f "$RUNNER_TEMP/socmind-minio.pid"; then
+            kill "$(cat "$RUNNER_TEMP/socmind-minio.pid")" || true
+          fi

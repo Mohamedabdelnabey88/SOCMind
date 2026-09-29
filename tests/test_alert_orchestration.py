@@ -254,3 +254,38 @@ def test_alert_flood_does_not_hide_relevant_active_case(tmp_path):
     result = orchestrate_alert_sqlite(db, follow, events, evidence_dir=evidence_dir)
     assert result.created is False
     assert result.case_id == root_result.case_id
+
+
+def test_identical_provider_ids_do_not_collapse_across_sources(tmp_path):
+    from datetime import datetime, timezone
+    db = tmp_path / 'identities.db'
+    now = datetime.now(timezone.utc)
+    first = AlertRecord('same-id', 'wazuh', now, 'First', 8, 'host-a', user='a')
+    second = AlertRecord('same-id', 'elastic', now, 'Second', 8, 'host-b', user='b')
+    a = orchestrate_alert_sqlite(db, first, [], evidence_dir=tmp_path / 'evidence')
+    b = orchestrate_alert_sqlite(db, second, [], evidence_dir=tmp_path / 'evidence')
+    assert a.created and b.created and a.case_id != b.case_id
+    assert not b.duplicate
+    assert case_detail(db, b.case_id)['alerts'][0]['alert_id'] == 'same-id'
+    assert orchestrate_alert_sqlite(db, first, [], evidence_dir=tmp_path/'evidence').duplicate
+    assert orchestrate_alert_sqlite(db, second, [], evidence_dir=tmp_path/'evidence').duplicate
+
+
+def test_legacy_alert_identity_remains_idempotent_after_upgrade(tmp_path):
+    import sqlite3
+    from datetime import datetime, timezone
+    from socmind.command_center import connect
+    db = tmp_path / 'legacy.db'
+    alert = AlertRecord('legacy-id', 'wazuh', datetime.now(timezone.utc), 'Legacy', 8, 'host-a')
+    first = orchestrate_alert_sqlite(db, alert, [], evidence_dir=tmp_path/'evidence')
+    # Convert the identity representation back to the pre-upgrade form.
+    with sqlite3.connect(db) as conn:
+        conn.execute('PRAGMA foreign_keys=OFF')
+        conn.execute("UPDATE case_alerts SET alert_id='legacy-id'")
+        conn.execute("UPDATE alerts SET alert_id='legacy-id', source_alert_id=NULL")
+        conn.execute('DROP INDEX idx_alert_source_identity')
+        conn.execute('ALTER TABLE alerts DROP COLUMN source_alert_id')
+    with connect(db) as conn:
+        assert 'source_alert_id' in {r[1] for r in conn.execute('PRAGMA table_info(alerts)')}
+    again = orchestrate_alert_sqlite(db, alert, [], evidence_dir=tmp_path/'evidence')
+    assert again.duplicate and again.case_id == first.case_id

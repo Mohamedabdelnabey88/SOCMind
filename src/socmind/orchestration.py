@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -194,7 +195,8 @@ def _best_match(
             window_minutes=window_minutes,
             threshold=threshold,
         )
-        if result.score > best.score:
+        if result.related and (not best.related or result.score > best.score or
+                               (result.score == best.score and case_id < (best_case or case_id))):
             best_case = case_id
             best = result
     if not best.related:
@@ -204,6 +206,7 @@ def _best_match(
 
 def _correlation_lock_keys(alert: AlertRecord) -> list[str]:
     keys = {
+        "identity:" + json.dumps([alert.source, alert.alert_id]),
         f"host:{alert.host.lower()}" if alert.host else "",
         f"user:{alert.user.lower()}" if alert.user else "",
         f"src:{alert.src_ip}" if alert.src_ip else "",
@@ -319,6 +322,7 @@ def _sqlite_decide_and_store(
     window_minutes: int,
     threshold: int,
 ) -> tuple[str, bool, bool, str, CorrelationResult]:
+    storage_id = "alert-v2-" + hashlib.sha256(json.dumps([alert.source, alert.alert_id]).encode()).hexdigest()
     priority = alert_priority(alert.severity)
     now = datetime.now(timezone.utc).isoformat()
 
@@ -326,8 +330,9 @@ def _sqlite_decide_and_store(
         conn.execute("BEGIN IMMEDIATE")
 
         duplicate = conn.execute(
-            "SELECT case_id FROM case_alerts WHERE alert_id=? LIMIT 1",
-            (alert.alert_id,),
+            "SELECT ca.case_id FROM case_alerts ca JOIN alerts a ON a.alert_id=ca.alert_id "
+            "WHERE a.source=? AND (a.source_alert_id=? OR (a.source_alert_id IS NULL AND a.alert_id=?)) LIMIT 1",
+            (alert.source, alert.alert_id, alert.alert_id),
         ).fetchone()
         if duplicate:
             conn.commit()
@@ -389,11 +394,11 @@ def _sqlite_decide_and_store(
             """
             INSERT INTO alerts(
               alert_id,source,timestamp,title,severity,priority,host,user,process,
-              src_ip,dst_ip,technique,rule_id,fingerprint,raw_reference,created_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              src_ip,dst_ip,technique,rule_id,fingerprint,raw_reference,created_at,source_alert_id
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                alert.alert_id,
+                storage_id,
                 alert.source,
                 alert.timestamp.isoformat(),
                 alert.title,
@@ -409,6 +414,7 @@ def _sqlite_decide_and_store(
                 alert_fingerprint(alert),
                 alert.raw_reference,
                 now,
+                alert.alert_id,
             ),
         )
 
@@ -421,7 +427,7 @@ def _sqlite_decide_and_store(
             """,
             (
                 case_id,
-                alert.alert_id,
+                storage_id,
                 link_result.score,
                 json.dumps([asdict(item) for item in link_result.reasons]),
                 now,
@@ -487,6 +493,7 @@ def _pg_decide_and_store(
     threshold: int,
 ) -> tuple[str, bool, bool, str, CorrelationResult]:
     initialize_postgres(dsn)
+    storage_id = "alert-v2-" + hashlib.sha256(json.dumps([alert.source, alert.alert_id]).encode()).hexdigest()
     priority = alert_priority(alert.severity)
     now = datetime.now(timezone.utc)
 
@@ -502,8 +509,9 @@ def _pg_decide_and_store(
                 )
 
             cur.execute(
-                "SELECT case_id FROM case_alerts WHERE alert_id=%s LIMIT 1",
-                (alert.alert_id,),
+                "SELECT ca.case_id FROM case_alerts ca JOIN alerts a ON a.alert_id=ca.alert_id "
+                "WHERE a.source=%s AND (a.source_alert_id=%s OR (a.source_alert_id IS NULL AND a.alert_id=%s)) LIMIT 1",
+                (alert.source, alert.alert_id, alert.alert_id),
             )
             duplicate = cur.fetchone()
             if duplicate:
@@ -566,11 +574,11 @@ def _pg_decide_and_store(
                 """
                 INSERT INTO alerts(
                   alert_id,source,timestamp,title,severity,priority,host,"user",process,
-                  src_ip,dst_ip,technique,rule_id,fingerprint,raw_reference,created_at
-                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                  src_ip,dst_ip,technique,rule_id,fingerprint,raw_reference,created_at,source_alert_id
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
-                    alert.alert_id,
+                    storage_id,
                     alert.source,
                     alert.timestamp,
                     alert.title,
@@ -586,6 +594,7 @@ def _pg_decide_and_store(
                     alert_fingerprint(alert),
                     alert.raw_reference,
                     now,
+                    alert.alert_id,
                 ),
             )
 
@@ -598,7 +607,7 @@ def _pg_decide_and_store(
                 """,
                 (
                     case_id,
-                    alert.alert_id,
+                    storage_id,
                     link_result.score,
                     json.dumps([asdict(item) for item in link_result.reasons]),
                     now,

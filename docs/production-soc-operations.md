@@ -614,3 +614,15 @@ local synthetic analysis and SQLite queue benchmarks. Measured output is in
 peak RSS, 10k/100k/1M events, 100/1k/10k cases, in-process API latency and eight
 concurrent workers. API timing excludes networking/TLS; these are not production
 capacity guarantees or PostgreSQL scale measurements.
+
+### Alert identity upgrade
+
+Alert identity is now scoped by source. Wazuh and Elastic may use identical
+provider IDs without collapsing into one alert. New rows use an internal
+SHA-256 storage key and preserve `source_alert_id`; case detail still displays
+the provider's original ID. Legacy rows remain readable and idempotent after
+an additive schema upgrade. Fallback IDs hash complete normalized event context
+instead of only rule plus second. New deterministic case IDs use a 128-bit
+suffix. Existing case IDs are not rewritten. Unknown placeholder context does
+not justify automatic correlation, and eligible candidates take precedence over
+higher-scoring candidates that fail the contextual-anchor policy.

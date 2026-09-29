@@ -489,3 +489,16 @@ def test_postgres_immutable_artifact_metadata(tmp_path):
     assert verify_artifacts(DSN, 'PG-ARTIFACT', {'local': store}, principal=actor, postgres=True)[0]['integrity_status'] == 'verified'
     (store.root / item['storage_key']).write_bytes(b'changed')
     assert verify_artifacts(DSN, 'PG-ARTIFACT', {'local': store}, principal=actor, postgres=True)[0]['integrity_status'] == 'mismatch'
+
+
+def test_postgres_alert_identity_is_namespaced_by_source(tmp_path):
+    from datetime import datetime, timezone
+    reset_database()
+    now=datetime.now(timezone.utc)
+    a=AlertRecord('provider-shared-id','wazuh',now,'First',8,'host-a',user='a')
+    b=AlertRecord('provider-shared-id','elastic',now,'Second',8,'host-b',user='b')
+    first=orchestrate_alert_postgres(DSN,a,[],evidence_dir=tmp_path/'evidence')
+    second=orchestrate_alert_postgres(DSN,b,[],evidence_dir=tmp_path/'evidence')
+    assert first.created and second.created and first.case_id != second.case_id
+    assert case_detail_pg(DSN,second.case_id)['alerts'][0]['alert_id']=='provider-shared-id'
+    assert orchestrate_alert_postgres(DSN,b,[],evidence_dir=tmp_path/'evidence').duplicate
