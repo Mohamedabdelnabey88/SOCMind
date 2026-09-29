@@ -5,12 +5,51 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-VALID_STATES = ("new", "triage", "investigating", "contained", "resolved", "false-positive")
+VALID_STATES = (
+    "new",
+    "triage",
+    "investigating",
+    "waiting-for-evidence",
+    "waiting-for-user",
+    "contained",
+    "monitoring",
+    "resolved",
+    "false-positive",
+)
+
 ALLOWED = {
     "new": {"triage"},
-    "triage": {"investigating", "false-positive", "resolved"},
-    "investigating": {"contained", "resolved", "false-positive"},
-    "contained": {"resolved"},
+    "triage": {
+        "investigating",
+        "waiting-for-evidence",
+        "waiting-for-user",
+        "false-positive",
+        "resolved",
+    },
+    "investigating": {
+        "waiting-for-evidence",
+        "waiting-for-user",
+        "contained",
+        "monitoring",
+        "resolved",
+        "false-positive",
+    },
+    "waiting-for-evidence": {
+        "investigating",
+        "waiting-for-user",
+        "contained",
+        "resolved",
+        "false-positive",
+    },
+    "waiting-for-user": {
+        "investigating",
+        "waiting-for-evidence",
+        "contained",
+        "resolved",
+        "false-positive",
+    },
+    "contained": {"monitoring", "resolved"},
+    "monitoring": {"investigating", "resolved"},
     "resolved": set(),
     "false-positive": set(),
 }
