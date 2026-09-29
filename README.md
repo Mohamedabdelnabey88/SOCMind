@@ -159,6 +159,12 @@ Missing evidence is tracked as an operational dependency; it is not treated as c
 
 Case state transitions also expose structured history with actor, timestamp and transition reason.
 
+### Milestone 4 — Unified Case Timeline
+
+Case Workspace now merges alert receipt/correlation, case creation, evidence and detection events, evidence collection, acknowledgement, assignment, notes, state changes, containment, resolution, escalation and detection feedback into one ordered operational timeline.
+
+Every timeline entry has canonical `timestamp`, `type`, `source`, `actor` and `detail` fields. Escalation and detection feedback are persisted permission-controlled actions rather than inferred UI labels.
+
 Detailed guide: [Production SOC Operations](docs/production-soc-operations.md)
 
 ## v1.5 Enterprise Foundation
