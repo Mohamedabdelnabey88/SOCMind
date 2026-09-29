@@ -92,6 +92,12 @@ async function openCase(caseId){
   q("#assignOwner").value=c.owner||"";
   q("#caseNotes").innerHTML=data.notes.map(n=>'<div><b>'+esc(n.author)+'</b><span>'+esc(n.created_at)+'</span><p>'+esc(n.text)+'</p></div>').join("")||"<div>No notes yet.</div>";
   q("#caseAudit").innerHTML=data.audit.map(a=>'<div><b>'+esc(a.action)+'</b><span>'+esc(a.actor)+' · '+esc(a.timestamp)+'</span><p>'+esc(a.detail)+'</p></div>').join("")||"<div>No audit entries yet.</div>";
+  q("#caseAlerts").innerHTML=(data.alerts||[]).map(a=>{
+    const reasons=(a.correlation_reasons||[]).map(r=>'<li>'+esc(r.detail)+' <span>+'+esc(r.weight)+'</span></li>').join("");
+    const rule=a.rule_id?(' · rule '+esc(a.rule_id)):"";
+    const technique=a.technique?(' · '+esc(a.technique)):"";
+    return '<div><b>'+esc(a.alert_id)+' · '+esc(a.source)+'</b><span>'+esc(a.timestamp)+' · severity '+esc(a.severity)+' · correlation '+esc(a.correlation_score)+rule+technique+'</span><p>'+esc(a.title)+'</p>'+(reasons?'<ul>'+reasons+'</ul>':'<p class="score">Root alert / no correlation reason required.</p>')+'</div>';
+  }).join("")||"<div>No orchestrated alerts linked to this case.</div>";
   if(data.investigation&& !data.investigation.error){
     q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><div class="chips"><span class="chip">'+esc(data.investigation.summary.events)+' events</span><span class="chip">'+esc(data.investigation.summary.findings)+' findings</span><span class="chip">risk '+esc(data.investigation.summary.highest_score)+'</span></div>';
   }else q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><p class="score">'+(c.evidence_path?"Evidence could not be parsed.":"No evidence file linked to this case.")+'</p>';
