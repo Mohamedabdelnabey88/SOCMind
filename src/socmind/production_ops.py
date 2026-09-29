@@ -190,10 +190,8 @@ def alert_from_event(event: Event) -> AlertRecord:
     ecs = data.get("ecs") if isinstance(data.get("ecs"), dict) else {}
     rule = ecs.get("rule") if isinstance(ecs.get("rule"), dict) else {}
     signal = ecs.get("signal") if isinstance(ecs.get("signal"), dict) else {}
-    severity_raw = (
-        rule.get("severity")
-        or signal.get("rule", {}).get("severity") if isinstance(signal.get("rule"), dict) else None
-    )
+    signal_rule = signal.get("rule") if isinstance(signal.get("rule"), dict) else {}
+    severity_raw = rule.get("severity") or signal_rule.get("severity")
     try:
         severity = int(severity_raw or 0)
     except (TypeError, ValueError):
@@ -206,7 +204,11 @@ def alert_from_event(event: Event) -> AlertRecord:
         (str(item).upper() for item in tags if str(item).lower().startswith("attack.t")),
         None,
     )
-    alert_id = str(ecs.get("_id") or f"elastic-{rule_id}-{int(event.timestamp.timestamp())}")
+    alert_id = str(
+        data.get("elastic_id")
+        or ecs.get("_id")
+        or f"elastic-{rule_id}-{int(event.timestamp.timestamp())}"
+    )
     return AlertRecord(
         alert_id=alert_id,
         source="elastic",
