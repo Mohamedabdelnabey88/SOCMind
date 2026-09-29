@@ -91,6 +91,13 @@ SOCMind currently scores explainable alert overlap using:
 
 Default merge threshold: `55`.
 
+The score alone does not trigger an automatic merge. SOCMind also applies a conservative context-anchor policy:
+
+- same host must be accompanied by at least one shared user, process, source IP, or destination IP; or
+- cross-host correlation requires at least two shared context anchors among user, process, source IP, and destination IP.
+
+Rule/technique similarity can strengthen a correlation score, but by itself it cannot justify automatic case merging. This intentionally prefers a false split over a false merge when evidence is weak.
+
 Default correlation time window: `15 minutes`.
 
 Both are configurable:
@@ -101,6 +108,8 @@ Both are configurable:
 ```
 
 The score is deterministic correlation evidence. It is **not attacker attribution** and it is not a probability that two alerts share a root cause.
+
+Candidate lookup is bounded by both the correlation time window and shared context anchors before scoring. This avoids a global “last N alerts” scan and keeps relevant cases discoverable during unrelated alert floods.
 
 ## Outcomes
 
