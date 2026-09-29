@@ -76,13 +76,19 @@
               <option value="resolved">resolved</option>
               <option value="false-positive">false-positive</option>
             </select>
+            <input id="transitionReason" placeholder="State change reason / context">
             <button id="transitionCase">Apply State</button>
           </div>
           <div class="grid two detail-grid">
             <div><h3>Analyst Notes</h3><div id="caseNotes" class="stack compact"></div>
               <div class="note-form"><textarea id="noteText" placeholder="Investigation note"></textarea><button id="addNote">Add Note</button></div>
             </div>
-            <div><h3>Audit Trail</h3><div id="caseAudit" class="stack compact"></div></div>
+            <div>
+              <h3>State History</h3>
+              <div id="caseStateHistory" class="stack compact"></div>
+              <h3 style="margin-top:16px">Audit Trail</h3>
+              <div id="caseAudit" class="stack compact"></div>
+            </div>
           </div>
           <div class="grid two detail-grid" style="margin-top:16px">
             <div>
@@ -90,6 +96,26 @@
               <div id="caseAlerts" class="stack compact"></div>
             </div>
             <div id="linkedInvestigation" class="linked-investigation"></div>
+          </div>
+          <div class="grid two detail-grid" style="margin-top:16px">
+            <div>
+              <div class="card-head">
+                <h3>Evidence Requirements</h3>
+                <button id="generateEvidenceRequirements">Generate from gaps</button>
+              </div>
+              <div id="caseEvidenceRequirements" class="stack compact"></div>
+            </div>
+            <div>
+              <h3>Manual Evidence Requirement</h3>
+              <div class="note-form">
+                <input id="evidenceReqKey" placeholder="Key e.g. vpn-history">
+                <input id="evidenceReqTitle" placeholder="Requirement title">
+                <input id="evidenceReqSource" placeholder="Source e.g. identity / endpoint / network">
+                <input id="evidenceReqTarget" placeholder="Target user/host (optional)">
+                <textarea id="evidenceReqRationale" placeholder="Why this evidence is required"></textarea>
+                <button id="createEvidenceRequirement">Create Requirement</button>
+              </div>
+            </div>
           </div>
           <div style="margin-top:16px">
             <h3>Evidence Collection History</h3>

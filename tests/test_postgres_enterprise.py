@@ -17,6 +17,12 @@ from socmind.enterprise_command_center import (
     upsert_case_pg,
 )
 from socmind.postgres_store import initialize_postgres, postgres_health, _psycopg
+from socmind.evidence_requests import (
+    create_requirement_pg,
+    ensure_suggested_requirements_pg,
+    list_requirements_pg,
+    update_requirement_pg,
+)
 from socmind.orchestration import orchestrate_alert_postgres
 from socmind.production_ops import AlertRecord
 from socmind.io import load_jsonl
@@ -39,7 +45,7 @@ def reset_database():
     initialize_postgres(DSN)
     with psycopg.connect(DSN) as conn:
         with conn.cursor() as cur:
-            cur.execute("TRUNCATE TABLE evidence_collections, case_alerts, alerts, case_audit, case_notes, cases RESTART IDENTITY CASCADE")
+            cur.execute("TRUNCATE TABLE evidence_requirements, evidence_collections, case_alerts, alerts, case_audit, case_notes, cases RESTART IDENTITY CASCADE")
         conn.commit()
 
 
@@ -74,7 +80,7 @@ def test_postgres_enterprise_store_round_trip():
 
     health = postgres_health(DSN)
     assert health["ready"]
-    assert health["socmind_tables"] == 6
+    assert health["socmind_tables"] == 7
 
 
 def test_postgres_lifecycle_pause_resume_and_schema_migration():
@@ -129,6 +135,92 @@ def test_postgres_lifecycle_pause_resume_and_schema_migration():
     item = next(x for x in snap["queue"] if x["case_id"] == "PG-LIFECYCLE")
     assert item["sla"]["paused"] is False
     assert item["sla"]["paused_minutes"] >= 9
+
+
+def test_postgres_evidence_requirements_round_trip_and_idempotency():
+    reset_database()
+    upsert_case_pg(
+        DSN,
+        new_case("PG-REQ-001", priority="P2"),
+        source="elastic",
+        title="PostgreSQL evidence requirements",
+        evidence_path=str(ROOT / "examples/attack_chain.jsonl"),
+    )
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+
+    first = ensure_suggested_requirements_pg(
+        DSN,
+        case_id="PG-REQ-001",
+        events=events,
+        requested_by="tier1",
+    )
+    second = ensure_suggested_requirements_pg(
+        DSN,
+        case_id="PG-REQ-001",
+        events=events,
+        requested_by="tier1",
+    )
+    assert first == second
+    assert first
+
+    requirement_id = first[0]
+    update_requirement_pg(
+        DSN,
+        requirement_id,
+        status="requested",
+        actor="tier1",
+        assigned_to="identity-team",
+    )
+    update_requirement_pg(
+        DSN,
+        requirement_id,
+        status="received",
+        actor="tier2",
+        response_summary="Identity evidence collected",
+        evidence_reference="case://PG-REQ-001/idp/context",
+    )
+
+    rows = list_requirements_pg(DSN, "PG-REQ-001")
+    received = next(
+        row for row in rows
+        if row["requirement_id"] == requirement_id
+    )
+    assert received["status"] == "received"
+    assert received["received_at"] is not None
+
+    detail = case_detail_pg(DSN, "PG-REQ-001")
+    assert detail["evidence_requirements"]
+    snap = command_center_snapshot_pg(DSN)
+    item = next(x for x in snap["queue"] if x["case_id"] == "PG-REQ-001")
+    assert item["evidence_requirements"]["open"] == len(first) - 1
+
+
+def test_postgres_concurrent_requirement_creation_collapses_to_one_row():
+    reset_database()
+    upsert_case_pg(
+        DSN,
+        new_case("PG-REQ-CONCURRENT", priority="P2"),
+        source="wazuh",
+        title="Concurrent requirement",
+    )
+
+    def create():
+        return create_requirement_pg(
+            DSN,
+            case_id="PG-REQ-CONCURRENT",
+            key="vpn-history",
+            title="Collect VPN history",
+            source="network",
+            target="alice",
+            rationale="VPN context missing",
+            requested_by="tier1",
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        ids = list(pool.map(lambda _: create(), range(4)))
+
+    assert len(set(ids)) == 1
+    assert len(list_requirements_pg(DSN, "PG-REQ-CONCURRENT")) == 1
 
 
 def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):

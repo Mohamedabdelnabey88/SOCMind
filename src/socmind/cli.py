@@ -281,6 +281,7 @@ def build_parser() -> argparse.ArgumentParser:
     command_transition.add_argument("case_id")
     command_transition.add_argument("--state", choices=VALID_STATES, required=True)
     command_transition.add_argument("--actor", default="cli-analyst")
+    command_transition.add_argument("--reason", help="Operational reason/context for the state change")
 
     command_note = sub.add_parser("command-note", help="Add a note to a registered case")
     command_note.add_argument("database")
@@ -755,7 +756,13 @@ def main() -> None:
         return
 
     if args.command == "command-transition":
-        transition_case(args.database, args.case_id, args.state, actor=args.actor)
+        transition_case(
+            args.database,
+            args.case_id,
+            args.state,
+            actor=args.actor,
+            reason=args.reason,
+        )
         print(f"Case state -> {args.case_id} | {args.state}")
         return
 

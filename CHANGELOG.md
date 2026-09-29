@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — v1.6 Evidence Requirements
+
+- convert validation gaps and unresolved questions into explicit Evidence Requirements
+- add requirement lifecycle: required / requested / received / unavailable / waived
+- keep missing evidence separate from contradicting evidence
+- require an evidence reference before marking a requirement received
+- require documented rationale before unavailable or waived disposition
+- add permission-controlled request/manage/waive operations
+- persist requirements in SQLite and PostgreSQL with open-requirement idempotency
+- expose open/overdue requirement counts in the Command Center
+- add Case Workspace controls for generated and manual requirements
+- add structured state history with actor, timestamp, from/to state and reason
+- validate requirement concurrency, lifecycle, RBAC, SQLite and PostgreSQL paths
+
 ## Unreleased — v1.6 Advanced Case Lifecycle
 
 - add waiting-for-evidence, waiting-for-user and monitoring operational states

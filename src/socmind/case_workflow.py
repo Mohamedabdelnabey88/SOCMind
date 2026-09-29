@@ -87,6 +87,26 @@ class CaseState:
     sla_paused_seconds: int = 0
 
 
+def state_history_from_audit(records) -> list[dict]:
+    history: list[dict] = []
+    for raw in records:
+        item = dict(raw)
+        if item.get("action") != "state-transition":
+            continue
+        detail = str(item.get("detail") or "")
+        transition_text, separator, reason = detail.partition(" | reason: ")
+        source_state, arrow, target_state = transition_text.partition(" -> ")
+        history.append({
+            "from_state": source_state.strip() if arrow else None,
+            "to_state": target_state.strip() if arrow else None,
+            "actor": item.get("actor"),
+            "timestamp": item.get("timestamp"),
+            "reason": reason.strip() if separator and reason.strip() else None,
+            "detail": detail,
+        })
+    return history
+
+
 def new_case(case_id: str, *, priority: str = "P3", owner: str | None = None) -> CaseState:
     now = datetime.now(timezone.utc).isoformat()
     return CaseState(case_id, "new", owner, priority, now, now)

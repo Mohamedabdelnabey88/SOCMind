@@ -75,7 +75,9 @@ async function loadCommandCenter(){
     q("#commandCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
     q("#caseQueue").innerHTML=commandPayload.queue.map(item=>{
       let sla="Closed";if(item.sla)sla=item.sla.breached?(item.sla.paused?'<span class="sla-breach">BREACHED · PAUSED</span>':'<span class="sla-breach">BREACHED</span>'):item.sla.paused?'<span class="chip">PAUSED · '+esc(item.sla.remaining_minutes+"m")+'</span>':esc(item.sla.remaining_minutes+"m");
-      return '<tr class="case-row" data-case="'+esc(item.case_id)+'"><td><strong>'+esc(item.case_id)+'</strong><br><span>'+esc(item.title||"")+'</span></td><td><span class="priority '+esc(item.priority.toLowerCase())+'">'+esc(item.priority)+'</span></td><td>'+esc(item.state)+'</td><td>'+esc(item.owner||"Unassigned")+'</td><td>'+sla+'</td></tr>';
+      const req=item.evidence_requirements||{open:0,overdue:0};
+      const reqText=req.open?(' · Evidence '+esc(req.open)+(req.overdue?' ('+esc(req.overdue)+' overdue)':'')):"";
+      return '<tr class="case-row" data-case="'+esc(item.case_id)+'"><td><strong>'+esc(item.case_id)+'</strong><br><span>'+esc(item.title||"")+reqText+'</span></td><td><span class="priority '+esc(item.priority.toLowerCase())+'">'+esc(item.priority)+'</span></td><td>'+esc(item.state)+'</td><td>'+esc(item.owner||"Unassigned")+'</td><td>'+sla+'</td></tr>';
     }).join("")||'<tr><td colspan="5">No matching cases.</td></tr>';
     qa(".case-row").forEach(row=>row.addEventListener("click",()=>openCase(row.dataset.case)));
     q("#workload").innerHTML=commandPayload.workload.map(item=>'<div><b>'+esc(item.owner)+'</b><span>'+esc(item.active_cases)+' active case(s)</span></div>').join("")||"<div>No active assignments.</div>";
@@ -92,6 +94,7 @@ async function openCase(caseId){
   q("#detailMeta").innerHTML='<span class="priority '+esc(c.priority.toLowerCase())+'">'+esc(c.priority)+'</span><span>'+esc(c.state)+'</span><span>Owner: '+esc(c.owner||"Unassigned")+'</span><span>Source: '+esc(c.source||"—")+'</span><span>Acknowledged: '+esc(c.acknowledged_at||"No")+'</span>'+pauseMeta;
   q("#assignOwner").value=c.owner||"";
   q("#caseNotes").innerHTML=data.notes.map(n=>'<div><b>'+esc(n.author)+'</b><span>'+esc(n.created_at)+'</span><p>'+esc(n.text)+'</p></div>').join("")||"<div>No notes yet.</div>";
+  q("#caseStateHistory").innerHTML=(data.state_history||[]).map(h=>'<div><b>'+esc((h.from_state||"—")+" → "+(h.to_state||"—"))+'</b><span>'+esc(h.actor||"unknown")+' · '+esc(h.timestamp||"—")+'</span><p>'+esc(h.reason||"No explicit reason recorded")+'</p></div>').join("")||"<div>No state transitions yet.</div>";
   q("#caseAudit").innerHTML=data.audit.map(a=>'<div><b>'+esc(a.action)+'</b><span>'+esc(a.actor)+' · '+esc(a.timestamp)+'</span><p>'+esc(a.detail)+'</p></div>').join("")||"<div>No audit entries yet.</div>";
   q("#caseAlerts").innerHTML=(data.alerts||[]).map(a=>{
     const reasons=(a.correlation_reasons||[]).map(r=>'<li>'+esc(r.detail)+' <span>+'+esc(r.weight)+'</span></li>').join("");
@@ -99,6 +102,37 @@ async function openCase(caseId){
     const technique=a.technique?(' · '+esc(a.technique)):"";
     return '<div><b>'+esc(a.alert_id)+' · '+esc(a.source)+'</b><span>'+esc(a.timestamp)+' · severity '+esc(a.severity)+' · correlation '+esc(a.correlation_score)+rule+technique+'</span><p>'+esc(a.title)+'</p>'+(reasons?'<ul>'+reasons+'</ul>':'<p class="score">Root alert / no correlation reason required.</p>')+'</div>';
   }).join("")||"<div>No orchestrated alerts linked to this case.</div>";
+  q("#caseEvidenceRequirements").innerHTML=(data.evidence_requirements||[]).map(item=>{
+    const due=item.due_at?(' · due '+esc(item.due_at)):"";
+    const assigned=item.assigned_to?(' · owner '+esc(item.assigned_to)):"";
+    const response=item.response_summary?'<p>'+esc(item.response_summary)+'</p>':"";
+    const reference=item.evidence_reference?'<p class="score">Evidence: '+esc(item.evidence_reference)+'</p>':"";
+    let actions="";
+    if(item.status==="required")actions+='<button class="evidence-req-action" data-id="'+esc(item.requirement_id)+'" data-status="requested">Mark Requested</button>';
+    if(item.status==="required"||item.status==="requested"||item.status==="unavailable"){
+      actions+='<button class="evidence-req-received" data-id="'+esc(item.requirement_id)+'">Mark Received</button>';
+      actions+='<button class="evidence-req-unavailable" data-id="'+esc(item.requirement_id)+'">Unavailable</button>';
+      actions+='<button class="evidence-req-waive" data-id="'+esc(item.requirement_id)+'">Waive</button>';
+    }
+    return '<div><b>'+esc(item.title)+' · '+esc(item.status)+'</b><span>'+esc(item.source)+(item.target?' · '+esc(item.target):'')+assigned+due+'</span><p>'+esc(item.rationale)+'</p>'+response+reference+'<div class="case-actions">'+actions+'</div></div>';
+  }).join("")||"<div>No evidence requirements yet.</div>";
+  qa(".evidence-req-action").forEach(btn=>btn.addEventListener("click",()=>updateEvidenceRequirement(btn.dataset.id,{status:btn.dataset.status})));
+  qa(".evidence-req-received").forEach(btn=>btn.addEventListener("click",()=>{
+    const reference=prompt("Evidence reference / URI");
+    if(!reference)return;
+    const summary=prompt("Evidence response summary (optional)")||"";
+    updateEvidenceRequirement(btn.dataset.id,{status:"received",evidence_reference:reference,response_summary:summary});
+  }));
+  qa(".evidence-req-unavailable").forEach(btn=>btn.addEventListener("click",()=>{
+    const summary=prompt("Why is this evidence unavailable?");
+    if(!summary)return;
+    updateEvidenceRequirement(btn.dataset.id,{status:"unavailable",response_summary:summary});
+  }));
+  qa(".evidence-req-waive").forEach(btn=>btn.addEventListener("click",()=>{
+    const summary=prompt("Lead waiver reason");
+    if(!summary)return;
+    updateEvidenceRequirement(btn.dataset.id,{status:"waived",response_summary:summary});
+  }));
   q("#caseEvidenceCollections").innerHTML=(data.evidence_collections||[]).map(item=>{
     const status=item.status==="completed"?"✓ completed":"⚠ "+esc(item.status||"unknown");
     const total=item.total_hits==null?"unknown":item.total_hits;
@@ -117,6 +151,63 @@ async function openCase(caseId){
   q("#caseDetailPanel").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
+async function updateEvidenceRequirement(id,body){
+  const res=await apiFetch("/api/evidence-requirements/"+encodeURIComponent(id),{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)
+  });
+  if(!res.ok){
+    const e=await res.json().catch(()=>({detail:"Evidence requirement update failed"}));
+    alert(e.detail||"Evidence requirement update failed");
+    return;
+  }
+  if(currentCaseId){await openCase(currentCaseId);await loadCommandCenter();}
+}
+
+async function generateEvidenceRequirements(){
+  if(!currentCaseId)return;
+  const res=await apiFetch("/api/cases/"+encodeURIComponent(currentCaseId)+"/evidence-requirements/generate",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({due_hours:4})
+  });
+  if(!res.ok){
+    const e=await res.json().catch(()=>({detail:"Evidence requirement generation failed"}));
+    alert(e.detail||"Evidence requirement generation failed");
+    return;
+  }
+  await openCase(currentCaseId);await loadCommandCenter();
+}
+
+async function createEvidenceRequirement(){
+  if(!currentCaseId)return;
+  const body={
+    key:q("#evidenceReqKey").value.trim(),
+    title:q("#evidenceReqTitle").value.trim(),
+    source:q("#evidenceReqSource").value.trim(),
+    target:q("#evidenceReqTarget").value.trim()||null,
+    rationale:q("#evidenceReqRationale").value.trim(),
+    due_hours:4
+  };
+  const res=await apiFetch("/api/cases/"+encodeURIComponent(currentCaseId)+"/evidence-requirements",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)
+  });
+  if(!res.ok){
+    const e=await res.json().catch(()=>({detail:"Evidence requirement creation failed"}));
+    alert(e.detail||"Evidence requirement creation failed");
+    return;
+  }
+  q("#evidenceReqKey").value="";
+  q("#evidenceReqTitle").value="";
+  q("#evidenceReqSource").value="";
+  q("#evidenceReqTarget").value="";
+  q("#evidenceReqRationale").value="";
+  await openCase(currentCaseId);await loadCommandCenter();
+}
+
 async function mutateCase(path,body=null){
   if(!currentCaseId)return;
   const opts={method:"POST",headers:{"Content-Type":"application/json"}};
@@ -127,8 +218,15 @@ async function mutateCase(path,body=null){
 }
 q("#ackCase").addEventListener("click",()=>mutateCase("/acknowledge"));
 q("#assignCase").addEventListener("click",()=>{const owner=q("#assignOwner").value.trim();if(owner)mutateCase("/assign",{owner});});
-q("#transitionCase").addEventListener("click",()=>{const state=q("#transitionState").value;if(state)mutateCase("/transition",{state});});
+q("#transitionCase").addEventListener("click",()=>{
+  const state=q("#transitionState").value;
+  if(!state)return;
+  const reason=q("#transitionReason").value.trim();
+  mutateCase("/transition",{state,reason}).then(()=>q("#transitionReason").value="");
+});
 q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim();if(!text)return;mutateCase("/notes",{text}).then(()=>q("#noteText").value="");});
+q("#generateEvidenceRequirements").addEventListener("click",generateEvidenceRequirements);
+q("#createEvidenceRequirement").addEventListener("click",createEvidenceRequirement);
 
 async function loadLeadHealth(){
   try{
