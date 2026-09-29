@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — v1.6 Evidence Integrity
+
+- generate atomic SHA-256 sidecar manifests for case evidence packages
+- record case ID, evidence filename, digest, size, collection timestamp, source and event count
+- generate manifests while the per-case evidence lock remains held
+- verify evidence with `socmind evidence-verify` and non-zero exit on mismatch
+- expose evidence integrity through case details and a dedicated read-only API endpoint
+- surface VALID/INVALID/missing-manifest state in the Case Workspace
+- add tamper-detection tests and cross-platform CI exercise
+
 ## Unreleased — v1.6 Live Alert Ingestion
 
 - pull Elastic Security alerts directly into the case-orchestration pipeline
