@@ -93,7 +93,7 @@ def test_orchestrated_case_exposes_alert_chain_and_unified_timeline(tmp_path):
 
     evidence_path = Path(first_result.evidence_path)
     evidence_path.write_text(
-        evidence_path.read_text(encoding="utf-8") + '{"tampered":true}\\n',
+        evidence_path.read_text(encoding="utf-8") + '{"tampered":true}\n',
         encoding="utf-8",
     )
     tampered = client.get(
