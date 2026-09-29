@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 
-from socmind.command_center import case_detail
+from socmind.command_center import case_detail, connect
 from socmind.io import load_jsonl
 from socmind.orchestration import orchestrate_alert_sqlite
 from socmind.production_ops import AlertRecord
@@ -151,3 +151,107 @@ def test_concurrent_correlated_alerts_collapse_into_one_sqlite_case(tmp_path):
     assert sum(1 for item in results if item.created) == 1
     detail = case_detail(db, results[0].case_id)
     assert len(detail["alerts"]) == 2
+
+
+def test_alert_flood_does_not_hide_relevant_active_case(tmp_path):
+    db = tmp_path / "soc.db"
+    evidence_dir = tmp_path / "evidence"
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+    base = events[0]
+
+    root = AlertRecord(
+        "ROOT-RELEVANT",
+        "wazuh",
+        base.timestamp,
+        "Relevant root alert",
+        8,
+        "TARGET-HOST",
+        user="target-user",
+        src_ip="198.51.100.10",
+        rule_id="ROOT-RULE",
+    )
+    root_result = orchestrate_alert_sqlite(
+        db,
+        root,
+        events,
+        evidence_dir=evidence_dir,
+    )
+
+    with connect(db) as conn:
+        for idx in range(650):
+            case_id = f"NOISE-CASE-{idx:04d}"
+            alert_id = f"NOISE-ALERT-{idx:04d}"
+            stamp = (base.timestamp + timedelta(seconds=idx + 1)).isoformat()
+            conn.execute(
+                """
+                INSERT INTO cases(
+                  case_id,state,priority,owner,opened_at,updated_at,
+                  source,title,acknowledged_at,evidence_path
+                ) VALUES(?,?,?,?,?,?,?,?,NULL,NULL)
+                """,
+                (
+                    case_id, "new", "P3", None, stamp, stamp,
+                    "wazuh", "Noise alert",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO alerts(
+                  alert_id,source,timestamp,title,severity,priority,host,user,process,
+                  src_ip,dst_ip,technique,rule_id,fingerprint,raw_reference,created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    alert_id,
+                    "wazuh",
+                    stamp,
+                    "Noise alert",
+                    3,
+                    "P3",
+                    f"NOISE-HOST-{idx}",
+                    f"noise-user-{idx}",
+                    None,
+                    f"203.0.113.{(idx % 200) + 1}",
+                    None,
+                    None,
+                    f"NOISE-RULE-{idx}",
+                    f"noise-fingerprint-{idx}",
+                    None,
+                    stamp,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO case_alerts(
+                  case_id,alert_id,correlation_score,correlation_reasons,linked_at
+                ) VALUES(?,?,?,?,?)
+                """,
+                (case_id, alert_id, 100, "[]", stamp),
+            )
+        conn.commit()
+
+    follow_up = AlertRecord(
+        "FOLLOW-UP-RELEVANT",
+        "wazuh",
+        base.timestamp + timedelta(minutes=12),
+        "Relevant follow-up",
+        13,
+        "TARGET-HOST",
+        user="target-user",
+        src_ip="198.51.100.10",
+        rule_id="FOLLOW-RULE",
+    )
+    result = orchestrate_alert_sqlite(
+        db,
+        follow_up,
+        events,
+        evidence_dir=evidence_dir,
+    )
+
+    assert result.created is False
+    assert result.case_id == root_result.case_id
+    assert result.correlation_score >= 55
+    assert any(
+        reason["key"] == "same-host"
+        for reason in result.correlation_reasons
+    )
