@@ -71,11 +71,13 @@ async function loadCommandCenter(){
     }
     q("#commandState").textContent="Live local queue";
     const s=commandPayload.summary;
-    const metrics=[["Active Cases",s.active],["P1 Active",s.p1_active],["SLA Breaches",s.sla_breached],["Unassigned",s.unassigned],["MTTA",s.mtta_minutes==null?"—":s.mtta_minutes+"m"],["MTTR",s.mttr_minutes==null?"—":s.mttr_minutes+"m"]];
+    const metrics=[["Active Cases",s.active],["P1 Active",s.p1_active],["SLA Breaches",s.sla_breached],["Unassigned",s.unassigned],["Evidence Open",s.open_evidence_requests||0],["Evidence Overdue",s.overdue_evidence_requests||0],["MTTA",s.mtta_minutes==null?"—":s.mtta_minutes+"m"],["MTTR",s.mttr_minutes==null?"—":s.mttr_minutes+"m"]];
     q("#commandCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
     q("#caseQueue").innerHTML=commandPayload.queue.map(item=>{
       let sla="Closed";if(item.sla)sla=item.sla.breached?'<span class="sla-breach">BREACHED</span>':esc(item.sla.remaining_minutes+"m");
-      return '<tr class="case-row" data-case="'+esc(item.case_id)+'"><td><strong>'+esc(item.case_id)+'</strong><br><span>'+esc(item.title||"")+'</span></td><td><span class="priority '+esc(item.priority.toLowerCase())+'">'+esc(item.priority)+'</span></td><td>'+esc(item.state)+'</td><td>'+esc(item.owner||"Unassigned")+'</td><td>'+sla+'</td></tr>';
+      const evidence=item.evidence_requests||{open:0,overdue:0};
+      const evidenceText=evidence.open?(' · Evidence '+esc(evidence.open)+(evidence.overdue?' ('+esc(evidence.overdue)+' overdue)':'')):"";
+      return '<tr class="case-row" data-case="'+esc(item.case_id)+'"><td><strong>'+esc(item.case_id)+'</strong><br><span>'+esc(item.title||"")+evidenceText+'</span></td><td><span class="priority '+esc(item.priority.toLowerCase())+'">'+esc(item.priority)+'</span></td><td>'+esc(item.state)+'</td><td>'+esc(item.owner||"Unassigned")+'</td><td>'+sla+'</td></tr>';
     }).join("")||'<tr><td colspan="5">No matching cases.</td></tr>';
     qa(".case-row").forEach(row=>row.addEventListener("click",()=>openCase(row.dataset.case)));
     q("#workload").innerHTML=commandPayload.workload.map(item=>'<div><b>'+esc(item.owner)+'</b><span>'+esc(item.active_cases)+' active case(s)</span></div>').join("")||"<div>No active assignments.</div>";
