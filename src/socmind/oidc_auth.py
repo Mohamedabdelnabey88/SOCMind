@@ -97,6 +97,27 @@ def _json_request(
     return payload
 
 
+def validate_oidc_config(config: OIDCConfig) -> OIDCConfig:
+    normalize_issuer(
+        config.issuer,
+        allow_insecure_http=config.allow_insecure_http,
+    )
+    if not str(config.client_id or "").strip():
+        raise ValueError("OIDC client ID is required")
+    if len(str(config.session_secret or "")) < 32:
+        raise ValueError("OIDC session secret must be at least 32 characters")
+    _require_https(
+        str(config.redirect_uri or ""),
+        allow_insecure_http=config.allow_insecure_http,
+    )
+    scopes = {item for item in str(config.scopes or "").split() if item}
+    if "openid" not in scopes:
+        raise ValueError("OIDC scopes must include 'openid'")
+    parse_role_map(config.role_map)
+    normalize_role(config.default_role)
+    return config
+
+
 def fetch_discovery(config: OIDCConfig) -> dict:
     url = discovery_url(
         config.issuer,
