@@ -426,6 +426,10 @@ def build_parser() -> argparse.ArgumentParser:
     store.add_argument("--database", help="SQLite command-center database")
     store.add_argument("--postgres-dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN")
     alert_ops.add_argument("--evidence-dir", default="socmind-evidence")
+    alert_ops.add_argument("--correlation-window", type=int, default=15)
+    alert_ops.add_argument("--correlation-threshold", type=int, default=55)
+    alert_ops.add_argument("--evidence-before", type=int, default=15)
+    alert_ops.add_argument("--evidence-after", type=int, default=15)
     alert_ops.add_argument("--json", action="store_true")
 
     return parser
@@ -988,6 +992,10 @@ def main() -> None:
                     alert,
                     evidence_events,
                     evidence_dir=args.evidence_dir,
+                    correlation_window_minutes=args.correlation_window,
+                    correlation_threshold=args.correlation_threshold,
+                    evidence_before_minutes=args.evidence_before,
+                    evidence_after_minutes=args.evidence_after,
                 )
             else:
                 if not dsn:
@@ -999,6 +1007,10 @@ def main() -> None:
                     alert,
                     evidence_events,
                     evidence_dir=args.evidence_dir,
+                    correlation_window_minutes=args.correlation_window,
+                    correlation_threshold=args.correlation_threshold,
+                    evidence_before_minutes=args.evidence_before,
+                    evidence_after_minutes=args.evidence_after,
                 )
             results.append({
                 "alert_id": alert.alert_id,
