@@ -62,6 +62,19 @@ from .rbac import ROLE_PERMISSIONS
 from .replay import replay_payload, render_replay
 from .report import render_text
 from .rule_tests import run_rule_test
+from .rule_lifecycle import (
+    RULE_LIFECYCLE_STATUSES,
+    record_coverage_delta,
+    record_false_positive_observation,
+    record_incident_replay,
+    register_rule,
+    rule_lifecycle_detail,
+    rule_lifecycle_list,
+    test_registered_rule,
+    transition_rule,
+    update_rule_version,
+    validate_registered_rule_syntax,
+)
 from .similarity import render_similarity, similarity_payload
 from .sla import evaluate_sla
 from .shift_brief import render_shift_brief
@@ -169,6 +182,117 @@ def build_parser() -> argparse.ArgumentParser:
     rule_test_cmd = sub.add_parser("rule-test", help="Run one detection rule fixture")
     rule_test_cmd.add_argument("rule")
     rule_test_cmd.add_argument("fixture")
+
+    rule_register_cmd = sub.add_parser(
+        "rule-register",
+        help="Register a detection rule in the governed lifecycle registry",
+    )
+    rule_register_cmd.add_argument("registry")
+    rule_register_cmd.add_argument("rule")
+    rule_register_cmd.add_argument("--owner", required=True)
+    rule_register_cmd.add_argument("--actor", required=True)
+    rule_register_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_register_cmd.add_argument("--version", default="1.0.0")
+    rule_register_cmd.add_argument("--note", default="Initial lifecycle registration")
+    rule_register_cmd.add_argument("--json", action="store_true")
+
+    rule_syntax_cmd = sub.add_parser(
+        "rule-syntax",
+        help="Run and record syntax validation for a registered detection rule",
+    )
+    rule_syntax_cmd.add_argument("registry")
+    rule_syntax_cmd.add_argument("rule_id")
+    rule_syntax_cmd.add_argument("--actor", required=True)
+    rule_syntax_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_syntax_cmd.add_argument("--json", action="store_true")
+
+    rule_lifecycle_test_cmd = sub.add_parser(
+        "rule-lifecycle-test",
+        help="Run a regression fixture and persist the lifecycle test result",
+    )
+    rule_lifecycle_test_cmd.add_argument("registry")
+    rule_lifecycle_test_cmd.add_argument("rule_id")
+    rule_lifecycle_test_cmd.add_argument("fixture")
+    rule_lifecycle_test_cmd.add_argument("--actor", required=True)
+    rule_lifecycle_test_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_lifecycle_test_cmd.add_argument("--json", action="store_true")
+
+    rule_replay_cmd = sub.add_parser(
+        "rule-replay-record",
+        help="Replay a registered rule against confirmed incident evidence and record the result",
+    )
+    rule_replay_cmd.add_argument("registry")
+    rule_replay_cmd.add_argument("rule_id")
+    rule_replay_cmd.add_argument("events")
+    rule_replay_cmd.add_argument("--case-id")
+    rule_replay_cmd.add_argument("--actor", required=True)
+    rule_replay_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_replay_cmd.add_argument("--json", action="store_true")
+
+    rule_fp_cmd = sub.add_parser(
+        "rule-fp-record",
+        help="Record a false-positive observation for a registered rule",
+    )
+    rule_fp_cmd.add_argument("registry")
+    rule_fp_cmd.add_argument("rule_id")
+    rule_fp_cmd.add_argument("--sample-size", type=int, required=True)
+    rule_fp_cmd.add_argument("--false-positives", type=int, required=True)
+    rule_fp_cmd.add_argument("--note", required=True)
+    rule_fp_cmd.add_argument("--actor", required=True)
+    rule_fp_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_fp_cmd.add_argument("--json", action="store_true")
+
+    rule_coverage_cmd = sub.add_parser(
+        "rule-coverage-record",
+        help="Record coverage delta evidence before lifecycle approval",
+    )
+    rule_coverage_cmd.add_argument("registry")
+    rule_coverage_cmd.add_argument("rule_id")
+    rule_coverage_cmd.add_argument("--visibility-delta", type=float, required=True)
+    rule_coverage_cmd.add_argument("--new-technique", action="append", default=[])
+    rule_coverage_cmd.add_argument("--note", default="")
+    rule_coverage_cmd.add_argument("--actor", required=True)
+    rule_coverage_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_coverage_cmd.add_argument("--json", action="store_true")
+
+    rule_version_cmd = sub.add_parser(
+        "rule-version",
+        help="Change a registered rule version with an auditable change note",
+    )
+    rule_version_cmd.add_argument("registry")
+    rule_version_cmd.add_argument("rule_id")
+    rule_version_cmd.add_argument("--version", required=True)
+    rule_version_cmd.add_argument("--note", required=True)
+    rule_version_cmd.add_argument("--actor", required=True)
+    rule_version_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_version_cmd.add_argument("--json", action="store_true")
+
+    rule_transition_cmd = sub.add_parser(
+        "rule-transition",
+        help="Move a registered rule through the governed lifecycle",
+    )
+    rule_transition_cmd.add_argument("registry")
+    rule_transition_cmd.add_argument("rule_id")
+    rule_transition_cmd.add_argument("--state", choices=RULE_LIFECYCLE_STATUSES, required=True)
+    rule_transition_cmd.add_argument("--note", required=True)
+    rule_transition_cmd.add_argument("--actor", required=True)
+    rule_transition_cmd.add_argument("--role", choices=sorted(ROLE_PERMISSIONS), required=True)
+    rule_transition_cmd.add_argument("--json", action="store_true")
+
+    rule_show_cmd = sub.add_parser(
+        "rule-show",
+        help="Show lifecycle metadata for one registered detection rule",
+    )
+    rule_show_cmd.add_argument("registry")
+    rule_show_cmd.add_argument("rule_id")
+    rule_show_cmd.add_argument("--json", action="store_true")
+
+    rule_list_cmd = sub.add_parser(
+        "rule-list",
+        help="List registered detection-rule lifecycle records",
+    )
+    rule_list_cmd.add_argument("registry")
+    rule_list_cmd.add_argument("--json", action="store_true")
 
     tune_cmd = sub.add_parser("tune", help="Suggest conservative false-positive tuning")
     tune_cmd.add_argument("dispositions")
@@ -596,6 +720,172 @@ def main() -> None:
         state = "PASS" if result.passed else "FAIL"
         print(f"{state} | {result.name} | expected={result.expected_matches} actual={result.actual_matches}")
         raise SystemExit(0 if result.passed else 1)
+
+    if args.command == "rule-register":
+        payload = register_rule(
+            args.registry,
+            args.rule,
+            owner=args.owner,
+            actor=args.actor,
+            role=args.role,
+            version=args.version,
+            note=args.note,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule registered -> {payload['rule_id']} | "
+                f"{payload['version']} | {payload['status']} | owner={payload['owner']}"
+            )
+        return
+
+    if args.command == "rule-syntax":
+        payload = validate_registered_rule_syntax(
+            args.registry,
+            args.rule_id,
+            actor=args.actor,
+            role=args.role,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule syntax -> {args.rule_id} | {payload['status']}"
+                + (f" | {payload['error']}" if payload.get("error") else "")
+            )
+        raise SystemExit(0 if payload["status"] == "passed" else 1)
+
+    if args.command == "rule-lifecycle-test":
+        payload = test_registered_rule(
+            args.registry,
+            args.rule_id,
+            args.fixture,
+            actor=args.actor,
+            role=args.role,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule test -> {args.rule_id} | {payload['status']} | "
+                f"expected={payload['expected_matches']} actual={payload['actual_matches']}"
+            )
+        raise SystemExit(0 if payload["status"] == "passed" else 1)
+
+    if args.command == "rule-replay-record":
+        payload = record_incident_replay(
+            args.registry,
+            args.rule_id,
+            args.events,
+            actor=args.actor,
+            role=args.role,
+            case_id=args.case_id,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule replay -> {args.rule_id} | visibility={payload['visibility_percent']}% "
+                f"| first_detection_step={payload['first_detection_step']}"
+            )
+        return
+
+    if args.command == "rule-fp-record":
+        payload = record_false_positive_observation(
+            args.registry,
+            args.rule_id,
+            actor=args.actor,
+            role=args.role,
+            sample_size=args.sample_size,
+            false_positives=args.false_positives,
+            note=args.note,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule FP observation -> {args.rule_id} | "
+                f"{payload['false_positives']}/{payload['sample_size']} "
+                f"({payload['false_positive_rate']:.2%})"
+            )
+        return
+
+    if args.command == "rule-coverage-record":
+        payload = record_coverage_delta(
+            args.registry,
+            args.rule_id,
+            actor=args.actor,
+            role=args.role,
+            visibility_delta=args.visibility_delta,
+            newly_covered_techniques=args.new_technique,
+            note=args.note,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Rule coverage -> {args.rule_id} | "
+                f"visibility_delta={payload['visibility_delta']} | "
+                f"new={','.join(payload['newly_covered_techniques']) or '-'}"
+            )
+        return
+
+    if args.command == "rule-version":
+        payload = update_rule_version(
+            args.registry,
+            args.rule_id,
+            version=args.version,
+            actor=args.actor,
+            role=args.role,
+            note=args.note,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"Rule version -> {payload['rule_id']} | {payload['version']}")
+        return
+
+    if args.command == "rule-transition":
+        payload = transition_rule(
+            args.registry,
+            args.rule_id,
+            args.state,
+            actor=args.actor,
+            role=args.role,
+            note=args.note,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"Rule lifecycle -> {payload['rule_id']} | {payload['status']}")
+        return
+
+    if args.command == "rule-show":
+        payload = rule_lifecycle_detail(args.registry, args.rule_id)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"{payload['rule_id']} | {payload['title']} | "
+                f"version={payload['version']} | status={payload['status']} | "
+                f"owner={payload['owner']}"
+            )
+            print(f"ATT&CK={','.join(payload['attack_mapping']) or '-'}")
+            print(f"syntax={payload['syntax_status']['status']} | test={payload['test_status']['status']}")
+        return
+
+    if args.command == "rule-list":
+        payload = rule_lifecycle_list(args.registry)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            for item in payload:
+                print(
+                    f"{item['rule_id']} | {item['version']} | "
+                    f"{item['status']} | owner={item['owner']}"
+                )
+        return
 
     if args.command == "tune":
         suggestions = suggest_tuning(load_dispositions(args.dispositions), min_samples=args.min_samples)
