@@ -6,6 +6,7 @@ from socmind.production_ops import (
     AlertRecord,
     alert_from_event,
     alert_priority,
+    alert_from_event,
     collect_evidence_window,
     correlate_alerts,
 )
@@ -88,3 +89,43 @@ def test_wazuh_event_can_be_promoted_to_alert():
     assert alert.alert_id == "wazuh-alert-1"
     assert alert.rule_id == "5710"
     assert alert.severity == 10
+
+
+def test_elastic_security_alert_schema_is_promoted_correctly():
+    from socmind.adapters.elastic import parse_elastic_ndjson
+
+    events = parse_elastic_ndjson(
+        ROOT / "tests/fixtures/elastic-security-alerts.ndjson"
+    )
+    alert = alert_from_event(events[0])
+    assert alert.alert_id == "elastic-sec-001"
+    assert alert.rule_id == "elastic-rule-ps-001"
+    assert alert.title == "Suspicious PowerShell"
+    assert alert.severity == 10
+    assert alert_priority(alert.severity) == "P2"
+    assert alert.technique == "T1059.001"
+
+    critical = alert_from_event(events[1])
+    assert critical.severity == 13
+    assert alert_priority(critical.severity) == "P1"
+
+
+def test_wazuh_mitre_metadata_is_promoted():
+    from socmind.adapters.wazuh import wazuh_alert_to_event
+
+    event = wazuh_alert_to_event({
+        "id": "wazuh-001",
+        "timestamp": "2026-09-28T10:00:00Z",
+        "agent": {"name": "WS-01"},
+        "rule": {
+            "id": "60122",
+            "level": 12,
+            "description": "Credential attack",
+            "mitre": {"id": ["T1110"]},
+        },
+        "data": {"srcip": "198.51.100.22", "dstuser": "analyst"},
+    })
+    alert = alert_from_event(event)
+    assert alert.alert_id == "wazuh-001"
+    assert alert.technique == "T1110"
+    assert alert.severity == 12
