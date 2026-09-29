@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -40,6 +41,17 @@ _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _rule_digest(path: str | Path) -> str:
+    target = Path(path)
+    if target.is_symlink():
+        raise ValueError("Detection rule source must not be a symlink")
+    digest = hashlib.sha256()
+    with target.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _empty_registry() -> dict:
@@ -214,6 +226,7 @@ def register_rule(
     rule = load_rule(source)
     status = rule.status if rule.status in RULE_LIFECYCLE_STATUSES else "experimental"
     now = _utc_now()
+    source_sha256 = _rule_digest(source)
 
     def operation(registry):
         if rule.id in registry["rules"]:
@@ -227,6 +240,7 @@ def register_rule(
             "created_at": now,
             "updated_at": now,
             "status": status,
+            "source_sha256": source_sha256,
             "change_notes": [{
                 "timestamp": now,
                 "actor": principal.subject,
@@ -238,12 +252,16 @@ def register_rule(
                 "status": "passed",
                 "checked_at": now,
                 "actor": principal.subject,
+                "version": clean_version,
+                "rule_sha256": source_sha256,
                 "error": None,
             },
             "test_status": {
                 "status": "not-run",
                 "tested_at": None,
                 "actor": None,
+                "version": clean_version,
+                "rule_sha256": None,
                 "fixture": None,
                 "expected_matches": None,
                 "actual_matches": None,
@@ -281,17 +299,22 @@ def validate_registered_rule_syntax(
         now = _utc_now()
         try:
             rule = load_rule(record["rule_path"])
+            current_hash = _rule_digest(record["rule_path"])
             error = None
             status = "passed"
             record["title"] = rule.title
             record["attack_mapping"] = rule.attack_techniques
+            record["source_sha256"] = current_hash
         except Exception as exc:
+            current_hash = None
             status = "failed"
             error = str(exc)
         record["syntax_status"] = {
             "status": status,
             "checked_at": now,
             "actor": principal.subject,
+            "version": record["version"],
+            "rule_sha256": current_hash,
             "error": error,
         }
         _history(
@@ -324,6 +347,8 @@ def test_registered_rule(
             "status": "passed" if result.passed else "failed",
             "tested_at": _utc_now(),
             "actor": principal.subject,
+            "version": record["version"],
+            "rule_sha256": _rule_digest(record["rule_path"]),
             "fixture": str(Path(fixture).resolve()),
             "name": result.name,
             "expected_matches": result.expected_matches,
@@ -364,6 +389,8 @@ def record_incident_replay(
         payload = {
             "timestamp": _utc_now(),
             "actor": principal.subject,
+            "version": record["version"],
+            "rule_sha256": _rule_digest(record["rule_path"]),
             "case_id": case_id,
             "events_path": str(Path(events_path).resolve()),
             "events": len(events),
@@ -416,6 +443,8 @@ def record_false_positive_observation(
         payload = {
             "timestamp": _utc_now(),
             "actor": principal.subject,
+            "version": record["version"],
+            "rule_sha256": _rule_digest(record["rule_path"]),
             "sample_size": sample,
             "false_positives": fp,
             "false_positive_rate": round(fp / sample, 6),
@@ -456,6 +485,8 @@ def record_coverage_delta(
         payload = {
             "timestamp": _utc_now(),
             "actor": principal.subject,
+            "version": record["version"],
+            "rule_sha256": _rule_digest(record["rule_path"]),
             "visibility_delta": float(visibility_delta),
             "newly_covered_techniques": techniques,
             "note": str(note or "").strip(),
@@ -497,6 +528,26 @@ def update_rule_version(
         if clean_version == previous:
             raise ValueError("New rule version must differ from current version")
         record["version"] = clean_version
+        current_hash = _rule_digest(record["rule_path"])
+        record["source_sha256"] = current_hash
+        record["syntax_status"] = {
+            "status": "not-run",
+            "checked_at": None,
+            "actor": None,
+            "version": clean_version,
+            "rule_sha256": None,
+            "error": None,
+        }
+        record["test_status"] = {
+            "status": "not-run",
+            "tested_at": None,
+            "actor": None,
+            "version": clean_version,
+            "rule_sha256": None,
+            "fixture": None,
+            "expected_matches": None,
+            "actual_matches": None,
+        }
         record.setdefault("change_notes", []).append({
             "timestamp": _utc_now(),
             "actor": principal.subject,
@@ -516,16 +567,38 @@ def update_rule_version(
 
 def approval_gaps(record: dict) -> list[str]:
     gaps: list[str] = []
-    if record.get("syntax_status", {}).get("status") != "passed":
-        gaps.append("syntax validation has not passed")
-    if record.get("test_status", {}).get("status") != "passed":
-        gaps.append("regression fixture test has not passed")
-    if not record.get("replay_results"):
-        gaps.append("confirmed-incident replay has not been recorded")
-    if not record.get("false_positive_history"):
-        gaps.append("false-positive observation has not been recorded")
-    if not record.get("coverage_history"):
-        gaps.append("coverage delta has not been recorded")
+    current_version = record.get("version")
+    current_hash = _rule_digest(record["rule_path"])
+
+    syntax = record.get("syntax_status", {})
+    if not (
+        syntax.get("status") == "passed"
+        and syntax.get("version") == current_version
+        and syntax.get("rule_sha256") == current_hash
+    ):
+        gaps.append("syntax validation has not passed for current rule content")
+
+    test = record.get("test_status", {})
+    if not (
+        test.get("status") == "passed"
+        and test.get("version") == current_version
+        and test.get("rule_sha256") == current_hash
+    ):
+        gaps.append("regression fixture test has not passed for current rule content")
+
+    def has_current(items):
+        return any(
+            item.get("version") == current_version
+            and item.get("rule_sha256") == current_hash
+            for item in items or []
+        )
+
+    if not has_current(record.get("replay_results")):
+        gaps.append("confirmed-incident replay has not been recorded for current rule content")
+    if not has_current(record.get("false_positive_history")):
+        gaps.append("false-positive observation has not been recorded for current rule content")
+    if not has_current(record.get("coverage_history")):
+        gaps.append("coverage delta has not been recorded for current rule content")
     return gaps
 
 
