@@ -137,6 +137,12 @@ CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
 CREATE INDEX IF NOT EXISTS idx_notes_case ON case_notes(case_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_case ON case_audit(case_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
-CREATE INDEX IF NOT EXISTS idx_alerts_host_user ON alerts(host, "user");
+CREATE INDEX IF NOT EXISTS idx_alerts_host_time ON alerts(LOWER(host), timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_user_time ON alerts(LOWER("user"), timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_process_time ON alerts(LOWER(process), timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_src_time ON alerts(src_ip, timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_dst_time ON alerts(dst_ip, timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_rule_time ON alerts(LOWER(rule_id), timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_technique_time ON alerts(LOWER(technique), timestamp);
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
 """
