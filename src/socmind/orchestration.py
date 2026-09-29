@@ -183,6 +183,16 @@ def _best_match(
     return best_case, best
 
 
+def _correlation_lock_keys(alert: AlertRecord) -> list[str]:
+    keys = {
+        f"host:{alert.host.lower()}" if alert.host else "",
+        f"user:{alert.user.lower()}" if alert.user else "",
+        f"src:{alert.src_ip}" if alert.src_ip else "",
+        f"dst:{alert.dst_ip}" if alert.dst_ip else "",
+    }
+    return sorted(key for key in keys if key)
+
+
 def _root_result() -> CorrelationResult:
     return CorrelationResult(
         True,
@@ -389,10 +399,14 @@ def _pg_decide_and_store(
 
     with _connect(dsn) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT pg_advisory_xact_lock(hashtext(%s))",
-                ("socmind-alert-orchestration",),
-            )
+            lock_keys = _correlation_lock_keys(alert)
+            if not lock_keys:
+                lock_keys = [f"source:{alert.source.lower()}"]
+            for key in lock_keys:
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"socmind-alert:{key}",),
+                )
 
             cur.execute(
                 "SELECT case_id FROM case_alerts WHERE alert_id=%s LIMIT 1",
