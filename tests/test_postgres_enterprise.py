@@ -8,6 +8,12 @@ from fastapi.testclient import TestClient
 
 from socmind.case_workflow import new_case
 from socmind.enterprise_auth import trusted_proxy_headers
+from socmind.evidence_requests import (
+    create_request_pg,
+    ensure_suggested_requests_pg,
+    list_requests_pg,
+    update_request_pg,
+)
 from socmind.enterprise_command_center import (
     add_case_note_pg,
     assign_case_pg,
@@ -38,7 +44,7 @@ def reset_database():
     initialize_postgres(DSN)
     with psycopg.connect(DSN) as conn:
         with conn.cursor() as cur:
-            cur.execute("TRUNCATE TABLE case_alerts, alerts, case_audit, case_notes, cases RESTART IDENTITY CASCADE")
+            cur.execute("TRUNCATE TABLE evidence_requests, case_alerts, alerts, case_audit, case_notes, cases RESTART IDENTITY CASCADE")
         conn.commit()
 
 
@@ -73,7 +79,7 @@ def test_postgres_enterprise_store_round_trip():
 
     health = postgres_health(DSN)
     assert health["ready"]
-    assert health["socmind_tables"] == 5
+    assert health["socmind_tables"] == 6
 
 
 def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):
@@ -236,3 +242,65 @@ def test_concurrent_postgres_alerts_collapse_into_one_case(tmp_path):
     assert sum(1 for item in results if item.created) == 1
     detail = case_detail_pg(DSN, results[0].case_id)
     assert len(detail["alerts"]) == 2
+
+
+def test_postgres_evidence_request_lifecycle_and_idempotent_suggestions():
+    reset_database()
+    events_path = ROOT / "examples/attack_chain.jsonl"
+    events = load_jsonl(events_path)
+    upsert_case_pg(
+        DSN,
+        new_case("PG-EVIDENCE", priority="P1"),
+        source="wazuh",
+        title="Evidence request case",
+        evidence_path=str(events_path),
+    )
+
+    first = ensure_suggested_requests_pg(
+        DSN,
+        case_id="PG-EVIDENCE",
+        events=events,
+        requested_by="tier2",
+    )
+    second = ensure_suggested_requests_pg(
+        DSN,
+        case_id="PG-EVIDENCE",
+        events=events,
+        requested_by="tier2",
+    )
+    assert first == second
+    rows = list_requests_pg(DSN, "PG-EVIDENCE")
+    assert len(rows) == len(set(first))
+
+    request_id = create_request_pg(
+        DSN,
+        case_id="PG-EVIDENCE",
+        key="manual-edr-context",
+        title="Collect EDR context",
+        source="endpoint",
+        target="host-1",
+        rationale="Validate endpoint activity.",
+        requested_by="tier2",
+        assigned_to="edr-team",
+    )
+    case_id = update_request_pg(
+        DSN,
+        request_id,
+        status="in-progress",
+        actor="edr-team",
+    )
+    assert case_id == "PG-EVIDENCE"
+    update_request_pg(
+        DSN,
+        request_id,
+        status="fulfilled",
+        actor="edr-team",
+        response_summary="EDR evidence collected.",
+        evidence_reference="edr://case/123",
+    )
+    manual = next(row for row in list_requests_pg(DSN, "PG-EVIDENCE") if row["request_id"] == request_id)
+    assert manual["status"] == "fulfilled"
+    assert manual["evidence_reference"] == "edr://case/123"
+
+    snapshot = command_center_snapshot_pg(DSN)
+    assert snapshot["summary"]["open_evidence_requests"] == len(first)
