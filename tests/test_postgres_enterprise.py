@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,9 @@ from socmind.enterprise_command_center import (
     upsert_case_pg,
 )
 from socmind.postgres_store import initialize_postgres, postgres_health, _psycopg
+from socmind.orchestration import orchestrate_alert_postgres
+from socmind.production_ops import AlertRecord
+from socmind.io import load_jsonl
 from socmind.webapp import create_app
 
 
@@ -133,3 +137,64 @@ def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):
     assert audit_status.status_code == 200
     assert audit_status.json()["valid"] is True
     assert audit_status.json()["records"] >= 2
+
+
+def test_postgres_alert_orchestration_correlates_and_deduplicates(tmp_path):
+    reset_database()
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+    base = events[0]
+    evidence_dir = tmp_path / "evidence"
+
+    first = AlertRecord(
+        "PG-ALERT-001",
+        "elastic",
+        base.timestamp,
+        "Initial suspicious authentication",
+        8,
+        base.host,
+        user=base.user,
+        src_ip=base.src_ip,
+        rule_id="ELASTIC-AUTH-1",
+    )
+    first_result = orchestrate_alert_postgres(
+        DSN,
+        first,
+        events,
+        evidence_dir=evidence_dir,
+    )
+    assert first_result.created is True
+
+    second = AlertRecord(
+        "PG-ALERT-002",
+        "elastic",
+        base.timestamp + timedelta(minutes=2),
+        "Follow-up suspicious authentication",
+        13,
+        base.host,
+        user=base.user,
+        src_ip=base.src_ip,
+        rule_id="ELASTIC-AUTH-2",
+    )
+    second_result = orchestrate_alert_postgres(
+        DSN,
+        second,
+        events,
+        evidence_dir=evidence_dir,
+    )
+    assert second_result.created is False
+    assert second_result.case_id == first_result.case_id
+    assert second_result.correlation_score >= 55
+
+    detail = case_detail_pg(DSN, first_result.case_id)
+    assert detail["case"]["priority"] == "P1"
+    assert len(detail["alerts"]) == 2
+    assert detail["alerts"][1]["correlation_reasons"]
+
+    duplicate = orchestrate_alert_postgres(
+        DSN,
+        second,
+        events,
+        evidence_dir=evidence_dir,
+    )
+    assert duplicate.duplicate is True
+    assert duplicate.case_id == first_result.case_id
