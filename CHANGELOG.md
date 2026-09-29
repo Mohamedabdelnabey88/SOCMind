@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — v1.6 Live Alert Ingestion
+
+- pull Elastic Security alerts directly into the case-orchestration pipeline
+- pull Wazuh Indexer `wazuh-alerts*` hits directly without temporary exports
+- support current Elastic Security `kibana.alert.*` rule, severity, risk and ATT&CK metadata
+- preserve Wazuh MITRE technique metadata from indexed alerts
+- isolate Elastic and Wazuh Indexer authentication environments
+- use provider-specific timestamp sorting
+- validate live HTTP search → normalization → case creation end to end
+- expand correlation/evidence boundary regression coverage
+
+
 ## Unreleased — v1.6 Live Evidence Collector
 
 - derive live evidence queries from alerts already linked to a case
