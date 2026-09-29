@@ -165,6 +165,16 @@ Case Workspace now merges alert receipt/correlation, case creation, evidence and
 
 Every timeline entry has canonical `timestamp`, `type`, `source`, `actor` and `detail` fields. Escalation and detection feedback are persisted permission-controlled actions rather than inferred UI labels.
 
+### Detection Rule Lifecycle
+
+Detection rules can now move through a governed lifecycle:
+
+```text
+experimental → testing → approved → production → deprecated → retired
+```
+
+The lifecycle registry records rule version, owner, change notes, ATT&CK mapping, syntax status, regression results, confirmed-incident replay results, false-positive history and coverage deltas. Promotion is explicitly human-controlled: rules cannot be approved until required validation evidence exists, and only Lead/Admin authority can approve or promote to production.
+
 Detailed guide: [Production SOC Operations](docs/production-soc-operations.md)
 
 ## v1.5 Enterprise Foundation

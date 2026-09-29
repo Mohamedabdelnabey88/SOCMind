@@ -96,7 +96,56 @@ coverage
 gaps
 tune
 lead-health
+
+rule-register
+rule-syntax
+rule-lifecycle-test
+rule-replay-record
+rule-fp-record
+rule-coverage-record
+rule-version
+rule-transition
+rule-show
+rule-list
 ```
+
+Governed lifecycle example:
+
+```bash
+socmind rule-register rule-registry.json detections/windows/suspicious-powershell.yml \
+  --owner detection-team --actor tier2@example.com --role senior-analyst
+
+socmind rule-transition rule-registry.json socmind-win-powershell-hidden \
+  --state testing --actor tier2@example.com --role senior-analyst \
+  --note "Begin controlled validation"
+
+socmind rule-lifecycle-test rule-registry.json socmind-win-powershell-hidden \
+  tests/fixtures/powershell-rule-test.json \
+  --actor tier2@example.com --role senior-analyst
+
+socmind rule-replay-record rule-registry.json socmind-win-powershell-hidden \
+  tests/fixtures/rule-events.jsonl --case-id CONFIRMED-001 \
+  --actor tier2@example.com --role senior-analyst
+
+socmind rule-fp-record rule-registry.json socmind-win-powershell-hidden \
+  --sample-size 20 --false-positives 1 \
+  --note "Representative admin activity" \
+  --actor tier2@example.com --role senior-analyst
+
+socmind rule-coverage-record rule-registry.json socmind-win-powershell-hidden \
+  --visibility-delta 12.5 --new-technique T1059.001 \
+  --actor tier2@example.com --role senior-analyst
+
+socmind rule-transition rule-registry.json socmind-win-powershell-hidden \
+  --state approved --actor lead@example.com --role lead \
+  --note "Validation evidence reviewed"
+
+socmind rule-transition rule-registry.json socmind-win-powershell-hidden \
+  --state production --actor lead@example.com --role lead \
+  --note "Lead-authorized production promotion"
+```
+
+Approval and production promotion are never automatic.
 
 ## Production SOC operations
 

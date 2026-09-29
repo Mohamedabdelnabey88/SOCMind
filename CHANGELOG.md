@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — v1.6 Detection Rule Lifecycle
+
+- add governed rule states: experimental / testing / approved / production / deprecated / retired
+- persist rule version, owner, timestamps, change notes and ATT&CK mapping in an atomic registry
+- record syntax validation, regression fixture results, confirmed-incident replay, false-positive observations and coverage deltas
+- require all validation evidence before approval or production promotion
+- require Lead/Admin authority for approve/deprecate/retire and Lead/Admin promotion authority for production
+- keep promotion entirely human-controlled; no automatic approval or production promotion
+- add cross-platform file locking, atomic registry writes and symlink guards
+- add CLI operations for registration, validation, replay, FP history, coverage, versioning and transitions
+- add concurrency, RBAC and promotion-gate regression tests
+
 ## Unreleased — v1.6 Unified Case Timeline
 
 - add one normalized operational timeline across detections, evidence, alerts and analyst actions
