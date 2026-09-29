@@ -24,7 +24,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v1.5 — Enterprise Foundation**
+> **v1.6 — Production SOC Operations**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -812,6 +812,8 @@ Every pull request validates:
 The initial portfolio roadmap is complete through **v1.2**. **v1.3** adds SOCMind's signature investigation-to-detection feedback loop. **v1.4** adds contradiction-aware reasoning and explainable historical case reuse.
 
 v1.5 adds the enterprise foundation: RBAC, trusted-proxy identity, PostgreSQL case storage, tamper-evident audit, backup and retention tooling.
+
+v1.6 begins Production SOC Operations with idempotent Wazuh/Elastic alert orchestration, explainable active-case correlation, evidence-window collection, priority escalation, concurrency-safe SQLite/PostgreSQL ingestion, and an auditable Alert Chain / unified case timeline.
 
 Future expansion remains organization-specific:
 
