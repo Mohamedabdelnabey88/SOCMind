@@ -180,3 +180,12 @@ def test_evidence_collector_excludes_unrelated_context():
     )
     window = collect_evidence_window(alert, [related, unrelated, outside])
     assert window.events == [related]
+
+
+def test_same_host_rule_and_technique_do_not_auto_merge_without_context_anchor():
+    ts = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+    first = AlertRecord("NOISY-1","elastic",ts,"Shared server detection",10,"SHARED-SERVER",technique="T1059.001",rule_id="POWERSHELL-RULE")
+    second = AlertRecord("NOISY-2","elastic",ts + timedelta(minutes=2),"Shared server detection",10,"SHARED-SERVER",technique="T1059.001",rule_id="POWERSHELL-RULE")
+    result = correlate_alerts(first, second)
+    assert result.score == 55
+    assert result.related is False

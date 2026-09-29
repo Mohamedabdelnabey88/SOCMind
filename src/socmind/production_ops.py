@@ -112,7 +112,23 @@ def correlate_alerts(
         add("same-technique", 15, f"Same ATT&CK technique: {left.technique}")
 
     score = min(score, 100)
-    return CorrelationResult(score >= threshold, score, reasons)
+    keys = {item.key for item in reasons}
+    context_anchors = {
+        "same-user",
+        "same-process",
+        "same-source-ip",
+        "same-destination-ip",
+    }
+    if "same-host" in keys:
+        anchor_safe = bool(keys & context_anchors)
+    else:
+        anchor_safe = len(keys & context_anchors) >= 2
+
+    return CorrelationResult(
+        score >= threshold and anchor_safe,
+        score,
+        reasons,
+    )
 
 
 def collect_evidence_window(

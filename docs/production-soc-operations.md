@@ -95,6 +95,10 @@ SOCMind currently scores explainable alert overlap using:
 
 Default merge threshold: `55`.
 
+The score alone does not trigger an automatic merge. Same-host correlation also requires shared user, process, source IP, or destination IP context; cross-host correlation requires multiple shared context anchors. Rule/ATT&CK similarity can strengthen a score but cannot justify automatic merging by itself.
+
+Candidate lookup is bounded by the correlation time window and shared context before scoring, so unrelated alert floods do not hide relevant active cases.
+
 Default correlation time window: `15 minutes`.
 
 Both are configurable:
