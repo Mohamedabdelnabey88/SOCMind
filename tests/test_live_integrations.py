@@ -4,16 +4,16 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from socmind.integrations import ElasticClient, WazuhClient, integration_check
 from socmind.cli import main as cli_main
 from socmind.command_center import list_cases
-from socmind.integrations import ElasticClient, WazuhClient, integration_check
 from socmind.ioc import IOC
 from socmind.threat_intel_live import MISPProvider, OpenCTIClient
 
 
 class Handler(BaseHTTPRequestHandler):
     last_authorization = None
-    last_body = b""
+    last_body = None
 
     def log_message(self, *args):
         pass
@@ -33,7 +33,6 @@ class Handler(BaseHTTPRequestHandler):
         Handler.last_authorization = self.headers.get("Authorization")
         length = int(self.headers.get("Content-Length", "0") or 0)
         Handler.last_body = self.rfile.read(length) if length else b""
-
         if self.path.startswith("/security/user/authenticate"):
             data = b"jwt-demo-token"
             self.send_response(200)
@@ -202,15 +201,13 @@ def test_alert_live_elastic_cli_creates_case(tmp_path, monkeypatch, capsys):
         httpd.shutdown()
 
 
-def test_alert_live_wazuh_indexer_uses_its_own_credentials(
-    tmp_path, monkeypatch, capsys
-):
+def test_alert_live_wazuh_indexer_cli_creates_case(tmp_path, monkeypatch, capsys):
     httpd = server()
     try:
         db = tmp_path / "wazuh-live.db"
         evidence = tmp_path / "evidence"
         monkeypatch.setenv("ELASTIC_API_KEY", "must-not-be-used")
-        monkeypatch.setenv("WAZUH_INDEXER_USER", "wazuh-user")
+        monkeypatch.setenv("WAZUH_INDEXER_USERNAME", "wazuh-user")
         monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "wazuh-pass")
         monkeypatch.setattr(
             sys,
