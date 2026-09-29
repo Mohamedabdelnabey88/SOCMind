@@ -433,6 +433,31 @@ def create_app(
             "case_timeline": build_unified_case_timeline(detail, investigation),
         }
 
+    @app.get("/api/cases/{target_case_id}/timeline")
+    def case_timeline_endpoint(
+        target_case_id: str,
+        user: Principal = Depends(allowed("case.read")),
+    ):
+        try:
+            detail = store_detail(target_case_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        investigation = None
+        evidence_path = (detail.get("case") or {}).get("evidence_path")
+        if evidence_path and Path(evidence_path).is_file():
+            try:
+                investigation = build_dashboard_payload(
+                    load_jsonl(evidence_path),
+                    case_id=target_case_id,
+                )
+            except Exception as exc:
+                investigation = {"error": str(exc)}
+        return {
+            "case_id": target_case_id,
+            "timeline": build_unified_case_timeline(detail, investigation),
+        }
+
     @app.get("/api/cases/{target_case_id}/evidence-integrity")
     def case_evidence_integrity(
         target_case_id: str,
