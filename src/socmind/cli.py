@@ -48,6 +48,7 @@ from .integrations import ElasticClient, WazuhClient, integration_check
 from .io import load_jsonl
 from .lead_metrics import lead_snapshot
 from .live_evidence import collect_case_evidence_postgres, collect_case_evidence_sqlite, collection_payload
+from .evidence_integrity import verification_payload, verify_evidence_manifest
 from .quality_gate import load_checklist, quality_payload, render_quality_review
 from .ioc import extract_iocs
 from .notes import append_note
@@ -226,6 +227,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     evidence_cmd = sub.add_parser("evidence", help="Fingerprint evidence with SHA-256")
     evidence_cmd.add_argument("path")
+
+    evidence_verify = sub.add_parser(
+        "evidence-verify",
+        help="Verify a SOCMind evidence package against its SHA-256 integrity manifest",
+    )
+    evidence_verify.add_argument("path", help="Evidence JSONL file")
+    evidence_verify.add_argument("--manifest", help="Optional manifest path; defaults to <evidence>.manifest.json")
+    evidence_verify.add_argument("--json", action="store_true")
 
     handoff_cmd = sub.add_parser("handoff", help="Create a shift handoff summary")
     handoff_cmd.add_argument("events")
@@ -668,6 +677,24 @@ def main() -> None:
     if args.command == "evidence":
         item = fingerprint(args.path)
         print(f"SHA256 {item.sha256} | bytes={item.size_bytes} | {item.path}")
+        return
+
+    if args.command == "evidence-verify":
+        result = verify_evidence_manifest(args.path, args.manifest)
+        payload = verification_payload(result)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            state = "VALID" if result.valid else "INVALID"
+            print(
+                f"Evidence integrity {state} | sha256={result.actual_sha256} | "
+                f"bytes={result.actual_size} | events={result.actual_event_count}"
+            )
+            if result.errors:
+                for error in result.errors:
+                    print(f"  - {error}")
+        if not result.valid:
+            raise SystemExit(1)
         return
 
     if args.command == "handoff":
