@@ -233,8 +233,10 @@ def _sqlite_candidate_rows(
     ):
         if value:
             anchors.append((column, value))
+
     anchor_sql = " OR ".join(
-        f"a.{column} = ? COLLATE NOCASE" for column, _ in anchors
+        f"a.{column} = ? COLLATE NOCASE"
+        for column, _ in anchors
     )
     params = [start, end, *[value for _, value in anchors]]
     return conn.execute(
@@ -272,8 +274,10 @@ def _pg_candidate_rows(
     ):
         if value:
             anchors.append((column, value))
+
     anchor_sql = " OR ".join(
-        f"LOWER(a.{column}) = LOWER(%s)" for column, _ in anchors
+        f"LOWER(a.{column}) = LOWER(%s)"
+        for column, _ in anchors
     )
     params = [start, end, *[value for _, value in anchors]]
     cur.execute(
