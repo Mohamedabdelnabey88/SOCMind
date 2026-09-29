@@ -10,6 +10,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "reasoning.read",
     }),
     "analyst": frozenset({
+        "case.evidence_request",
         "case.read",
         "case.acknowledge",
         "case.note",
@@ -17,6 +18,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "reasoning.read",
     }),
     "senior-analyst": frozenset({
+        "case.evidence_request",
         "case.read",
         "case.acknowledge",
         "case.note",
@@ -27,6 +29,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "detection.review",
     }),
     "lead": frozenset({
+        "case.evidence_request",
         "case.read",
         "case.acknowledge",
         "case.note",
