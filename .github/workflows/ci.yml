@@ -77,6 +77,7 @@ jobs:
       - run: socmind postgres-schema -o socmind-postgres.sql
       - run: socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database alert-ci.db --evidence wazuh.jsonl --evidence-dir alert-evidence --json
       - run: socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database alert-ci.db --evidence wazuh.jsonl --evidence-dir alert-evidence --json
+      - run: socmind alert-orchestrate elastic tests/fixtures/elastic-security-alerts.ndjson --database elastic-alert-ci.db --evidence-dir elastic-alert-evidence --json
 
   kali:
     runs-on: ubuntu-latest
@@ -143,6 +144,7 @@ jobs:
           .venv/bin/socmind postgres-schema -o kali-postgres.sql
           .venv/bin/socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database kali-alerts.db --evidence wazuh-kali.jsonl --evidence-dir kali-alert-evidence --json
           .venv/bin/socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database kali-alerts.db --evidence wazuh-kali.jsonl --evidence-dir kali-alert-evidence --json
+          .venv/bin/socmind alert-orchestrate elastic tests/fixtures/elastic-security-alerts.ndjson --database kali-elastic-alerts.db --evidence-dir kali-elastic-alert-evidence --json
       - name: Exercise web dashboard on Kali
         shell: bash
         run: |
@@ -172,6 +174,7 @@ jobs:
       - run: wheel-venv/bin/socmind help enterprise
       - run: wheel-venv/bin/socmind enterprise-info --json
       - run: wheel-venv/bin/socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database wheel-alerts.db --evidence-dir wheel-alert-evidence --json
+      - run: wheel-venv/bin/socmind alert-orchestrate elastic tests/fixtures/elastic-security-alerts.ndjson --database wheel-elastic-alerts.db --evidence-dir wheel-elastic-evidence --json
       - run: wheel-venv/bin/socmind doctor
       - name: Verify packaged web assets
         shell: bash
@@ -216,3 +219,4 @@ jobs:
       - run: socmind enterprise-info --json
       - run: socmind trusted-sign --subject ci-analyst@example.com --role analyst
       - run: socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --postgres-dsn "$SOCMIND_POSTGRES_DSN" --evidence-dir pg-alert-evidence --json
+      - run: socmind alert-orchestrate elastic tests/fixtures/elastic-security-alerts.ndjson --postgres-dsn "$SOCMIND_POSTGRES_DSN" --evidence-dir pg-elastic-alert-evidence --json
