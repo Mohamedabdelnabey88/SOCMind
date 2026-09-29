@@ -9,9 +9,11 @@ from .adapters import (
     parse_auditd,
     parse_auth_log,
     parse_elastic_ndjson,
+    elastic_search_hits_to_events,
     parse_evtx,
     parse_journald_json,
     parse_wazuh_alerts,
+    wazuh_search_hits_to_events,
     parse_windows_event_xml,
 )
 from .case import export_case
@@ -431,6 +433,27 @@ def build_parser() -> argparse.ArgumentParser:
     alert_ops.add_argument("--evidence-before", type=int, default=15)
     alert_ops.add_argument("--evidence-after", type=int, default=15)
     alert_ops.add_argument("--json", action="store_true")
+
+    live_ops = sub.add_parser(
+        "alert-live",
+        help="Pull live Elastic/Wazuh Indexer alerts and orchestrate them into SOC cases",
+    )
+    live_ops.add_argument("provider", choices=["elastic", "wazuh-indexer"])
+    live_ops.add_argument("url")
+    live_ops.add_argument("index")
+    live_store = live_ops.add_mutually_exclusive_group(required=True)
+    live_store.add_argument("--database", help="SQLite command-center database")
+    live_store.add_argument("--postgres-dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN")
+    live_ops.add_argument("--size", type=int, default=100)
+    live_ops.add_argument("--query-file")
+    live_ops.add_argument("--evidence", help="Optional normalized evidence JSONL; defaults to pulled alert events")
+    live_ops.add_argument("--evidence-dir", default="socmind-evidence")
+    live_ops.add_argument("--correlation-window", type=int, default=15)
+    live_ops.add_argument("--correlation-threshold", type=int, default=55)
+    live_ops.add_argument("--evidence-before", type=int, default=15)
+    live_ops.add_argument("--evidence-after", type=int, default=15)
+    live_ops.add_argument("--insecure", action="store_true")
+    live_ops.add_argument("--json", action="store_true")
 
     return parser
 
@@ -969,6 +992,119 @@ def main() -> None:
                 limit=args.limit,
                 exclude_case_id=args.exclude_case_id,
             ))
+        return
+
+    if args.command == "alert-live":
+        query = None
+        if args.query_file:
+            raw_query = json.loads(
+                Path(args.query_file).read_text(encoding="utf-8")
+            )
+            query = raw_query.get("query", raw_query)
+
+        client = ElasticClient(
+            args.url,
+            api_key=os.environ.get("ELASTIC_API_KEY"),
+            bearer_token=(
+                os.environ.get("WAZUH_INDEXER_JWT")
+                if args.provider == "wazuh-indexer"
+                else os.environ.get("ELASTIC_BEARER_TOKEN")
+            ),
+            username=(
+                os.environ.get("WAZUH_INDEXER_USERNAME")
+                if args.provider == "wazuh-indexer"
+                else os.environ.get("ELASTIC_USERNAME")
+            ),
+            password=(
+                os.environ.get("WAZUH_INDEXER_PASSWORD")
+                if args.provider == "wazuh-indexer"
+                else os.environ.get("ELASTIC_PASSWORD")
+            ),
+            verify_tls=not args.insecure,
+        )
+        response = client.search(
+            args.index,
+            query=query,
+            size=args.size,
+            sort=[{"@timestamp": {"order": "asc"}}],
+        )
+        hits = response.get("hits", {}).get("hits", [])
+        alert_events = (
+            wazuh_search_hits_to_events(hits)
+            if args.provider == "wazuh-indexer"
+            else elastic_search_hits_to_events(hits)
+        )
+        evidence_events = (
+            load_jsonl(args.evidence)
+            if args.evidence
+            else alert_events
+        )
+        dsn = args.postgres_dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
+        results = []
+        for event in alert_events:
+            alert = alert_from_event(event)
+            if args.database:
+                result = orchestrate_alert_sqlite(
+                    args.database,
+                    alert,
+                    evidence_events,
+                    evidence_dir=args.evidence_dir,
+                    correlation_window_minutes=args.correlation_window,
+                    correlation_threshold=args.correlation_threshold,
+                    evidence_before_minutes=args.evidence_before,
+                    evidence_after_minutes=args.evidence_after,
+                )
+            else:
+                if not dsn:
+                    raise SystemExit("Set SOCMIND_POSTGRES_DSN or pass --postgres-dsn.")
+                result = orchestrate_alert_postgres(
+                    dsn,
+                    alert,
+                    evidence_events,
+                    evidence_dir=args.evidence_dir,
+                    correlation_window_minutes=args.correlation_window,
+                    correlation_threshold=args.correlation_threshold,
+                    evidence_before_minutes=args.evidence_before,
+                    evidence_after_minutes=args.evidence_after,
+                )
+            results.append({
+                "alert_id": alert.alert_id,
+                "case_id": result.case_id,
+                "created": result.created,
+                "duplicate": result.duplicate,
+                "priority": result.priority,
+                "correlation_score": result.correlation_score,
+                "correlation_reasons": result.correlation_reasons,
+                "evidence_count": result.evidence_count,
+                "evidence_path": result.evidence_path,
+            })
+
+        payload = {
+            "provider": args.provider,
+            "hits": len(hits),
+            "alerts": len(results),
+            "new_cases": sum(1 for item in results if item["created"]),
+            "duplicates": sum(1 for item in results if item["duplicate"]),
+            "results": results,
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print("SOCMind Live Alert Orchestration")
+            print("===============================")
+            print(
+                f"provider={args.provider} hits={len(hits)} "
+                f"alerts={len(results)} new_cases={payload['new_cases']} "
+                f"duplicates={payload['duplicates']}"
+            )
+            for item in results:
+                state = "DUPLICATE" if item["duplicate"] else (
+                    "NEW CASE" if item["created"] else "CORRELATED"
+                )
+                print(
+                    f"{item['alert_id']} | {state} | {item['case_id']} | "
+                    f"{item['priority']} | correlation={item['correlation_score']}"
+                )
         return
 
     if args.command == "alert-orchestrate":
