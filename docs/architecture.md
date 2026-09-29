@@ -33,3 +33,6 @@ flowchart LR
 7. **Missing evidence is an operational dependency, not a contradiction** — validation gaps can become permission-controlled Evidence Requirements with explicit lifecycle and audit history.
 8. **Case state changes are auditable facts** — persistent case stores expose structured transition history derived from the append-only case audit trail.
 9. **Timeline is a read model over durable facts** — the unified case timeline normalizes alerts, evidence, detections and audited analyst actions without replacing their source records.
+10. **Identity is verified before RBAC** — local token, signed trusted-proxy and native OIDC authentication all resolve to the same SOCMind Principal/RBAC model.
+11. **OIDC secrets stay out of source control** — client/session secrets are runtime environment values; provider discovery and JWKS are verified over HTTPS by default.
+12. **OIDC browser sessions are bounded and same-origin** — Authorization Code + PKCE S256, state/nonce checks, signed HttpOnly cookies and safe return-path validation are enforced before workspace access.
