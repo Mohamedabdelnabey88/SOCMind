@@ -680,7 +680,10 @@ def main() -> None:
         return
 
     if args.command == "evidence-verify":
-        result = verify_evidence_manifest(args.path, args.manifest)
+        try:
+            result = verify_evidence_manifest(args.path, args.manifest)
+        except (OSError, ValueError, TypeError) as exc:
+            raise SystemExit(f"Evidence verification failed: {exc}") from exc
         payload = verification_payload(result)
         if args.json:
             print(json.dumps(payload, indent=2))
