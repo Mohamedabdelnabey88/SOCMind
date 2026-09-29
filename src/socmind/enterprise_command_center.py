@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .case_workflow import ALLOWED, CLOSED_STATES, PAUSED_STATES, CaseState
+from .case_workflow import ALLOWED, CLOSED_STATES, PAUSED_STATES, CaseState, state_history_from_audit
 from .postgres_store import _psycopg, initialize_postgres
 from .sla import evaluate_sla
 
@@ -290,10 +290,7 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
                 (case_id,),
             )
             audit = cur.fetchall()
-            state_history = [
-                row for row in audit
-                if row.get("action") == "state-transition"
-            ]
+            state_history = state_history_from_audit(audit)
             cur.execute(
                 """
                 SELECT
