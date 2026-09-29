@@ -391,6 +391,33 @@ def command_center_snapshot_pg(
         for case in active_filtered
     }
 
+    evidence_by_case: dict[str, dict[str, int]] = {}
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  case_id,
+                  COUNT(*) FILTER (
+                    WHERE status IN ('pending','in-progress')
+                  ) AS open_count,
+                  COUNT(*) FILTER (
+                    WHERE status IN ('pending','in-progress')
+                      AND due_at IS NOT NULL
+                      AND due_at < NOW()
+                  ) AS overdue_count
+                FROM evidence_requests
+                GROUP BY case_id
+                """
+            )
+            evidence_by_case = {
+                row["case_id"]: {
+                    "open": int(row["open_count"] or 0),
+                    "overdue": int(row["overdue_count"] or 0),
+                }
+                for row in cur.fetchall()
+            }
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "summary": {
@@ -400,6 +427,8 @@ def command_center_snapshot_pg(
             "unassigned": sum(1 for case in active_all if not case.owner),
             "sla_breached": len(breached),
             "resolved": len(resolved),
+            "open_evidence_requests": sum(v["open"] for v in evidence_by_case.values()),
+            "overdue_evidence_requests": sum(v["overdue"] for v in evidence_by_case.values()),
             "mtta_minutes": round(sum(mtta_values) / len(mtta_values), 1)
             if mtta_values
             else None,
@@ -433,6 +462,10 @@ def command_center_snapshot_pg(
                 "updated_at": case.updated_at,
                 "acknowledged_at": case.acknowledged_at,
                 "has_evidence": bool(case.evidence_path),
+                "evidence_requests": evidence_by_case.get(
+                    case.case_id,
+                    {"open": 0, "overdue": 0},
+                ),
                 "sla": {
                     "breached": sla_by_case[case.case_id].breached,
                     "remaining_minutes": sla_by_case[case.case_id].remaining_minutes,
