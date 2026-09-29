@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 
-from socmind.command_center import case_detail, connect
+from socmind.command_center import case_detail, connect, transition_case
 from socmind.evidence_integrity import verify_evidence_manifest
 from socmind.io import load_jsonl
 from socmind.orchestration import _correlation_lock_keys, orchestrate_alert_sqlite
@@ -156,6 +156,62 @@ def test_concurrent_correlated_alerts_collapse_into_one_sqlite_case(tmp_path):
     integrity = verify_evidence_manifest(evidence_path)
     assert integrity.valid is True
     assert integrity.actual_event_count == results[0].evidence_count
+
+
+def test_waiting_case_remains_eligible_for_alert_correlation(tmp_path):
+    db = tmp_path / "soc.db"
+    evidence_dir = tmp_path / "evidence"
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+    base = events[0]
+
+    first = AlertRecord(
+        "WAIT-CORR-001",
+        "wazuh",
+        base.timestamp,
+        "Waiting correlation root",
+        8,
+        base.host,
+        user=base.user,
+        src_ip=base.src_ip,
+        rule_id="WAIT-CORR-ROOT",
+    )
+    root = orchestrate_alert_sqlite(
+        db,
+        first,
+        events,
+        evidence_dir=evidence_dir,
+    )
+    transition_case(db, root.case_id, "triage", actor="analyst")
+    transition_case(
+        db,
+        root.case_id,
+        "waiting-for-evidence",
+        actor="analyst",
+    )
+
+    follow = AlertRecord(
+        "WAIT-CORR-002",
+        "wazuh",
+        base.timestamp + timedelta(minutes=2),
+        "Waiting correlation follow-up",
+        13,
+        base.host,
+        user=base.user,
+        src_ip=base.src_ip,
+        rule_id="WAIT-CORR-FOLLOW",
+    )
+    result = orchestrate_alert_sqlite(
+        db,
+        follow,
+        events,
+        evidence_dir=evidence_dir,
+    )
+
+    assert result.created is False
+    assert result.case_id == root.case_id
+    detail = case_detail(db, root.case_id)
+    assert detail["case"]["state"] == "waiting-for-evidence"
+    assert len(detail["alerts"]) == 2
 
 
 def test_postgres_lock_keys_are_deterministic_and_identity_scoped():
