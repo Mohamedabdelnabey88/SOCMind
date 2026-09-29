@@ -51,7 +51,7 @@ escalate
 command-register
 command-ack
 command-assign
-command-transition
+command-transition   # supports --reason for auditable state-change context
 command-note
 command-show
 command-center
