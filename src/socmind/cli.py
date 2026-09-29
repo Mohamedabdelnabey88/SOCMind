@@ -327,7 +327,15 @@ def build_parser() -> argparse.ArgumentParser:
     web_cmd.add_argument("--proposed-rules", help="Optional proposed rule pack for IRE what-if comparison")
     web_cmd.add_argument("--quality-checklist", help="Optional analyst checklist JSON for IRE quality gate")
     web_cmd.add_argument("--api-token", help="Optional API token; prefer SOCMIND_API_TOKEN environment variable")
-    web_cmd.add_argument("--auth-mode", choices=["local-token", "trusted-proxy"], default="local-token")
+    web_cmd.add_argument("--auth-mode", choices=["local-token", "trusted-proxy", "oidc"], default="local-token")
+    web_cmd.add_argument("--oidc-issuer", help="OIDC issuer; prefer SOCMIND_OIDC_ISSUER")
+    web_cmd.add_argument("--oidc-client-id", help="OIDC client ID; prefer SOCMIND_OIDC_CLIENT_ID")
+    web_cmd.add_argument("--oidc-redirect-uri", help="Exact OIDC callback URI; prefer SOCMIND_OIDC_REDIRECT_URI")
+    web_cmd.add_argument("--oidc-role-claim", default=None, help="Claim containing groups/roles; default groups")
+    web_cmd.add_argument("--oidc-role-map", help="JSON claim-value to SOCMind-role map; prefer SOCMIND_OIDC_ROLE_MAP")
+    web_cmd.add_argument("--oidc-default-role", choices=sorted(ROLE_PERMISSIONS), default=None)
+    web_cmd.add_argument("--oidc-scopes", default=None, help="OIDC scopes; must include openid")
+    web_cmd.add_argument("--oidc-allow-insecure-http", action="store_true", help="Allow loopback HTTP only for local OIDC development")
     web_cmd.add_argument("--api-token-role", choices=sorted(ROLE_PERMISSIONS), default="admin")
     web_cmd.add_argument("--enterprise-audit", help="Optional tamper-evident enterprise audit JSONL path")
     web_cmd.add_argument("--allow-unsafe-remote", action="store_true", help="Explicitly allow non-loopback bind without token (isolated lab only)")
@@ -1717,8 +1725,24 @@ def main() -> None:
         from .webapp import create_app
         api_token = args.api_token or os.environ.get("SOCMIND_API_TOKEN")
         trusted_proxy_secret = os.environ.get("SOCMIND_TRUSTED_PROXY_SECRET")
+        oidc_issuer = args.oidc_issuer or os.environ.get("SOCMIND_OIDC_ISSUER")
+        oidc_client_id = args.oidc_client_id or os.environ.get("SOCMIND_OIDC_CLIENT_ID")
+        oidc_client_secret = os.environ.get("SOCMIND_OIDC_CLIENT_SECRET")
+        oidc_redirect_uri = args.oidc_redirect_uri or os.environ.get("SOCMIND_OIDC_REDIRECT_URI")
+        oidc_session_secret = os.environ.get("SOCMIND_OIDC_SESSION_SECRET")
+        oidc_role_claim = args.oidc_role_claim or os.environ.get("SOCMIND_OIDC_ROLE_CLAIM", "groups")
+        oidc_role_map = args.oidc_role_map or os.environ.get("SOCMIND_OIDC_ROLE_MAP")
+        oidc_default_role = args.oidc_default_role or os.environ.get("SOCMIND_OIDC_DEFAULT_ROLE", "viewer")
+        oidc_scopes = args.oidc_scopes or os.environ.get("SOCMIND_OIDC_SCOPES", "openid profile email")
         auth_configured = (
-            args.auth_mode == "trusted-proxy" and bool(trusted_proxy_secret)
+            (args.auth_mode == "trusted-proxy" and bool(trusted_proxy_secret))
+            or (
+                args.auth_mode == "oidc"
+                and bool(oidc_issuer)
+                and bool(oidc_client_id)
+                and bool(oidc_redirect_uri)
+                and bool(oidc_session_secret)
+            )
         )
         try:
             validate_web_binding(
@@ -1743,6 +1767,16 @@ def main() -> None:
             auth_mode=args.auth_mode,
             api_token_role=args.api_token_role,
             trusted_proxy_secret=trusted_proxy_secret,
+            oidc_issuer=oidc_issuer,
+            oidc_client_id=oidc_client_id,
+            oidc_client_secret=oidc_client_secret,
+            oidc_redirect_uri=oidc_redirect_uri,
+            oidc_session_secret=oidc_session_secret,
+            oidc_role_claim=oidc_role_claim,
+            oidc_role_map=oidc_role_map,
+            oidc_default_role=oidc_default_role,
+            oidc_scopes=oidc_scopes,
+            oidc_allow_insecure_http=args.oidc_allow_insecure_http,
             enterprise_audit_path=args.enterprise_audit,
         )
         print(f"SOCMind Web -> http://{args.host}:{args.port}")
