@@ -24,6 +24,7 @@ class AuthConfig:
     trusted_max_skew_seconds: int = 90
     oidc_session_secret: str | None = None
     oidc_session_cookie: str = "socmind_oidc_session"
+    oidc_issuer: str | None = None
 
 
 def _proxy_signature(
@@ -74,6 +75,14 @@ def authenticate(
         subject = str(payload.get("sub") or "").strip()
         if not subject:
             raise PermissionError("OIDC session subject is missing")
+        if config.oidc_issuer:
+            expected_issuer = config.oidc_issuer.rstrip("/")
+            session_issuer = str(payload.get("iss") or "").rstrip("/")
+            if not session_issuer or not secrets.compare_digest(
+                session_issuer,
+                expected_issuer,
+            ):
+                raise PermissionError("OIDC session issuer does not match configuration")
         role = normalize_role(str(payload.get("role") or "viewer"))
         return Principal(subject, role, "oidc")
 
