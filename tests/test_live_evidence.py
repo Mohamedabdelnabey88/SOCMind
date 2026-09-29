@@ -33,7 +33,12 @@ class FakeElastic:
         })
         if self.error:
             raise self.error
-        return {"hits": {"hits": self.hits}}
+        return {
+            "hits": {
+                "total": {"value": max(len(self.hits), 25), "relation": "eq"},
+                "hits": self.hits,
+            }
+        }
 
 
 def _case_with_alert(tmp_path):
@@ -106,6 +111,8 @@ def test_live_collection_merges_evidence_and_journals_success(tmp_path):
     assert result.status == "completed"
     assert result.fetched_events == 1
     assert result.evidence_events == 1
+    assert result.total_hits == 25
+    assert result.truncated is True
     assert Path(result.evidence_path).is_file()
     assert client.calls[0]["index"] == "logs-*"
     assert client.calls[0]["sort"]
@@ -114,6 +121,8 @@ def test_live_collection_merges_evidence_and_journals_success(tmp_path):
     assert detail["case"]["evidence_path"] == result.evidence_path
     assert detail["evidence_collections"][0]["status"] == "completed"
     assert detail["evidence_collections"][0]["event_count"] == 1
+    assert detail["evidence_collections"][0]["total_hits"] == 25
+    assert detail["evidence_collections"][0]["truncated"] == 1
     assert detail["evidence_collections"][0]["query"]["bool"]
     assert any(
         item["action"] == "evidence-collected"
