@@ -10,6 +10,7 @@ from .case_workflow import new_case
 from .command_center import connect, upsert_case
 from .enterprise_command_center import _connect, upsert_case_pg
 from .models import Event
+from .postgres_store import initialize_postgres
 from .production_ops import (
     AlertRecord,
     CorrelationResult,
@@ -427,6 +428,7 @@ def orchestrate_alert_postgres(
     *,
     evidence_dir: str | Path,
 ) -> OrchestrationResult:
+    initialize_postgres(dsn)
     duplicate_case = _pg_duplicate(dsn, alert.alert_id)
     priority = alert_priority(alert.severity)
     if duplicate_case:
