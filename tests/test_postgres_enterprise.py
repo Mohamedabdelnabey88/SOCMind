@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 
@@ -198,3 +199,40 @@ def test_postgres_alert_orchestration_correlates_and_deduplicates(tmp_path):
     )
     assert duplicate.duplicate is True
     assert duplicate.case_id == first_result.case_id
+
+
+def test_concurrent_postgres_alerts_collapse_into_one_case(tmp_path):
+    reset_database()
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+    base = events[0]
+    evidence_dir = tmp_path / "evidence"
+    alerts = [
+        AlertRecord(
+            f"PG-CONCURRENT-{idx}",
+            "elastic",
+            base.timestamp + timedelta(seconds=idx),
+            f"Concurrent enterprise alert {idx}",
+            10,
+            base.host,
+            user=base.user,
+            src_ip=base.src_ip,
+            rule_id=f"PG-RULE-{idx}",
+        )
+        for idx in (1, 2)
+    ]
+
+    def run(alert):
+        return orchestrate_alert_postgres(
+            DSN,
+            alert,
+            events,
+            evidence_dir=evidence_dir,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run, alerts))
+
+    assert len({item.case_id for item in results}) == 1
+    assert sum(1 for item in results if item.created) == 1
+    detail = case_detail_pg(DSN, results[0].case_id)
+    assert len(detail["alerts"]) == 2
