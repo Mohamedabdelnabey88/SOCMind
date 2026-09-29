@@ -356,7 +356,12 @@ def collect_case_evidence_sqlite(
         hits = response.get("hits", {}).get("hits", [])
         events: list[Event] = parse_elastic_hits(hits)
         total_hits, truncated = _search_total(response, len(events))
-        evidence_count = _merge_evidence(Path(plan.evidence_path), events)
+        evidence_count = _merge_evidence(
+            Path(plan.evidence_path),
+            events,
+            case_id=case_id,
+            source=f"{provider}:{index}",
+        )
         _finish_sqlite_collection(
             db_path,
             collection_id,
@@ -431,7 +436,12 @@ def collect_case_evidence_postgres(
         hits = response.get("hits", {}).get("hits", [])
         events: list[Event] = parse_elastic_hits(hits)
         total_hits, truncated = _search_total(response, len(events))
-        evidence_count = _merge_evidence(Path(plan.evidence_path), events)
+        evidence_count = _merge_evidence(
+            Path(plan.evidence_path),
+            events,
+            case_id=case_id,
+            source=f"{provider}:{index}",
+        )
         _finish_pg_collection(
             dsn,
             collection_id,
