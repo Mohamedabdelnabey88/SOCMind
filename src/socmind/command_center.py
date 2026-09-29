@@ -82,24 +82,6 @@ CREATE TABLE IF NOT EXISTS case_alerts (
     FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE,
     FOREIGN KEY(alert_id) REFERENCES alerts(alert_id) ON DELETE CASCADE
 );
-CREATE TABLE IF NOT EXISTS evidence_collections (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    collection_id TEXT NOT NULL UNIQUE,
-    case_id TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    source_ref TEXT NOT NULL,
-    window_start TEXT NOT NULL,
-    window_end TEXT NOT NULL,
-    query_json TEXT NOT NULL,
-    status TEXT NOT NULL,
-    event_count INTEGER NOT NULL DEFAULT 0,
-    total_hits INTEGER,
-    truncated INTEGER NOT NULL DEFAULT 0,
-    error TEXT,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE
-);
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority,state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
 CREATE INDEX IF NOT EXISTS idx_notes_case ON case_notes(case_id,created_at);
@@ -113,41 +95,48 @@ CREATE INDEX IF NOT EXISTS idx_alerts_dst_time ON alerts(dst_ip,timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_rule_time ON alerts(rule_id COLLATE NOCASE,timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_technique_time ON alerts(technique COLLATE NOCASE,timestamp);
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
-CREATE INDEX IF NOT EXISTS idx_evidence_collections_case ON evidence_collections(case_id,started_at);
 """
 
 
-def _retry_locked(operation, *, attempts: int = 20):
+def _retry_locked(operation, *, attempts: int = 8):
+    delay = 0.02
     for attempt in range(attempts):
         try:
             return operation()
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc).lower() or attempt == attempts - 1:
                 raise
-            time.sleep(min(0.05 * (attempt + 1), 0.5))
+            time.sleep(delay)
+            delay = min(delay * 2, 0.5)
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path), timeout=10.0)
+    conn = sqlite3.connect(str(path), timeout=30.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=30000")
 
-    def configure_journal():
-        mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower()
-        if mode != "wal":
-            conn.execute("PRAGMA journal_mode=WAL")
+    current_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    if str(current_mode).lower() != "wal":
+        _retry_locked(lambda: conn.execute("PRAGMA journal_mode=WAL").fetchone())
 
-    _retry_locked(configure_journal)
     conn.execute("PRAGMA synchronous=NORMAL")
     _retry_locked(lambda: conn.executescript(SCHEMA))
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
+
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(cases)").fetchall()
+    }
     for name, sql_type in {
         "acknowledged_at": "TEXT",
         "evidence_path": "TEXT",
     }.items():
         if name not in columns:
-            conn.execute(f"ALTER TABLE cases ADD COLUMN {name} {sql_type}")
+            _retry_locked(
+                lambda name=name, sql_type=sql_type: conn.execute(
+                    f"ALTER TABLE cases ADD COLUMN {name} {sql_type}"
+                )
+            )
     conn.commit()
     return conn
 
@@ -325,29 +314,7 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 item["correlation_reasons"] = json.loads(item["correlation_reasons"])
             except (TypeError, json.JSONDecodeError):
                 item["correlation_reasons"] = []
-        collections = [
-            dict(row)
-            for row in conn.execute(
-                """
-                SELECT * FROM evidence_collections
-                WHERE case_id=?
-                ORDER BY started_at DESC
-                """,
-                (case_id,),
-            ).fetchall()
-        ]
-        for item in collections:
-            try:
-                item["query"] = json.loads(item.pop("query_json"))
-            except (TypeError, json.JSONDecodeError):
-                item["query"] = {}
-    return {
-        "case": case,
-        "notes": notes,
-        "audit": audit,
-        "alerts": alerts,
-        "evidence_collections": collections,
-    }
+    return {"case": case, "notes": notes, "audit": audit, "alerts": alerts}
 
 
 def list_cases(
