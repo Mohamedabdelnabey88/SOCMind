@@ -98,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="SOCMind 1.5.0")
+    parser.add_argument("--version", action="version", version="SOCMind 1.6.0")
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show task-oriented SOCMind help")
