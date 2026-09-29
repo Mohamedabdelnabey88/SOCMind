@@ -76,6 +76,7 @@ jobs:
       - run: socmind enterprise-info --json
       - run: socmind postgres-schema -o socmind-postgres.sql
       - run: socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --database alert-ci.db --evidence wazuh.jsonl --evidence-dir alert-evidence --json
+      - run: python -c "import glob,subprocess; p=glob.glob('alert-evidence/*.jsonl')[0]; subprocess.check_call(['socmind','evidence-verify',p,'--json'])"
       - run: socmind alert-orchestrate elastic tests/fixtures/elastic-security-alerts.ndjson --database elastic-alert-ci.db --evidence-dir elastic-alert-evidence --json
       - run: socmind alert-live --help
       - run: socmind case-collect-evidence --help

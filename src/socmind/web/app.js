@@ -107,9 +107,12 @@ async function openCase(caseId){
   q("#caseTimeline").innerHTML=(data.case_timeline||[]).map(item=>
     '<div class="event"><time>'+esc(item.timestamp||"—")+'</time><strong>'+esc(item.kind)+' · '+esc(item.title)+'</strong><p>'+esc(item.detail||"")+'</p></div>'
   ).join("")||"<div>No operational timeline entries yet.</div>";
+  const integrity=data.evidence_integrity||{};
+  const integrityText=integrity.valid===true?"Integrity VALID":integrity.valid===false?"Integrity INVALID":integrity.reason==="manifest-missing"?"Integrity manifest missing":"Integrity unavailable";
+  const integrityHtml=integrity.valid===false?'<strong class="sla-breach">'+esc(integrityText)+'</strong>':'<span class="chip">'+esc(integrityText)+'</span>';
   if(data.investigation&& !data.investigation.error){
-    q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><div class="chips"><span class="chip">'+esc(data.investigation.summary.events)+' events</span><span class="chip">'+esc(data.investigation.summary.findings)+' findings</span><span class="chip">risk '+esc(data.investigation.summary.highest_score)+'</span></div>';
-  }else q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><p class="score">'+(c.evidence_path?"Evidence could not be parsed.":"No evidence file linked to this case.")+'</p>';
+    q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><div class="chips"><span class="chip">'+esc(data.investigation.summary.events)+' events</span><span class="chip">'+esc(data.investigation.summary.findings)+' findings</span><span class="chip">risk '+esc(data.investigation.summary.highest_score)+'</span>'+integrityHtml+'</div>';
+  }else q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><p class="score">'+(c.evidence_path?"Evidence could not be parsed.":"No evidence file linked to this case.")+'</p><div class="chips">'+integrityHtml+'</div>';
   q("#caseDetailPanel").scrollIntoView({behavior:"smooth",block:"start"});
 }
 

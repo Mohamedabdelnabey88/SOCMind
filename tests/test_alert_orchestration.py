@@ -3,6 +3,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from socmind.command_center import case_detail, connect
+from socmind.evidence_integrity import verify_evidence_manifest
 from socmind.io import load_jsonl
 from socmind.orchestration import _correlation_lock_keys, orchestrate_alert_sqlite
 from socmind.production_ops import AlertRecord
@@ -151,6 +152,10 @@ def test_concurrent_correlated_alerts_collapse_into_one_sqlite_case(tmp_path):
     assert sum(1 for item in results if item.created) == 1
     detail = case_detail(db, results[0].case_id)
     assert len(detail["alerts"]) == 2
+    evidence_path = Path(results[0].evidence_path)
+    integrity = verify_evidence_manifest(evidence_path)
+    assert integrity.valid is True
+    assert integrity.actual_event_count == results[0].evidence_count
 
 
 def test_postgres_lock_keys_are_deterministic_and_identity_scoped():
