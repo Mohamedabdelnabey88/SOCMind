@@ -4,7 +4,7 @@ import json
 import os
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .command_center import connect
@@ -213,6 +213,90 @@ def _new_case_result() -> CorrelationResult:
     )
 
 
+
+def _sqlite_candidate_rows(
+    conn,
+    alert: AlertRecord,
+    *,
+    window_minutes: int,
+):
+    start = (alert.timestamp - timedelta(minutes=window_minutes)).isoformat()
+    end = (alert.timestamp + timedelta(minutes=window_minutes)).isoformat()
+    anchors = [("host", alert.host)]
+    for column, value in (
+        ("user", alert.user),
+        ("process", alert.process),
+        ("src_ip", alert.src_ip),
+        ("dst_ip", alert.dst_ip),
+        ("technique", alert.technique),
+        ("rule_id", alert.rule_id),
+    ):
+        if value:
+            anchors.append((column, value))
+
+    anchor_sql = " OR ".join(
+        f"a.{column} = ? COLLATE NOCASE"
+        for column, _ in anchors
+    )
+    params = [start, end, *[value for _, value in anchors]]
+    return conn.execute(
+        f"""
+        SELECT ca.case_id, a.*
+        FROM case_alerts ca
+        JOIN alerts a ON a.alert_id=ca.alert_id
+        JOIN cases c ON c.case_id=ca.case_id
+        WHERE c.state NOT IN ('resolved','false-positive')
+          AND a.timestamp BETWEEN ? AND ?
+          AND ({anchor_sql})
+        ORDER BY a.timestamp DESC
+        LIMIT 2000
+        """,
+        params,
+    ).fetchall()
+
+
+def _pg_candidate_rows(
+    cur,
+    alert: AlertRecord,
+    *,
+    window_minutes: int,
+):
+    start = alert.timestamp - timedelta(minutes=window_minutes)
+    end = alert.timestamp + timedelta(minutes=window_minutes)
+    anchors = [("host", alert.host)]
+    for column, value in (
+        ('"user"', alert.user),
+        ("process", alert.process),
+        ("src_ip", alert.src_ip),
+        ("dst_ip", alert.dst_ip),
+        ("technique", alert.technique),
+        ("rule_id", alert.rule_id),
+    ):
+        if value:
+            anchors.append((column, value))
+
+    anchor_sql = " OR ".join(
+        f"LOWER(a.{column}) = LOWER(%s)"
+        for column, _ in anchors
+    )
+    params = [start, end, *[value for _, value in anchors]]
+    cur.execute(
+        f"""
+        SELECT ca.case_id, a.*
+        FROM case_alerts ca
+        JOIN alerts a ON a.alert_id=ca.alert_id
+        JOIN cases c ON c.case_id=ca.case_id
+        WHERE c.state NOT IN ('resolved','false-positive')
+          AND a.timestamp BETWEEN %s AND %s
+          AND ({anchor_sql})
+        ORDER BY a.timestamp DESC
+        LIMIT 2000
+        """,
+        params,
+    )
+    return cur.fetchall()
+
+
 def _sqlite_decide_and_store(
     db_path: str | Path,
     alert: AlertRecord,
@@ -248,17 +332,11 @@ def _sqlite_decide_and_store(
                 ),
             )
 
-        rows = conn.execute(
-            """
-            SELECT ca.case_id, a.*
-            FROM case_alerts ca
-            JOIN alerts a ON a.alert_id=ca.alert_id
-            JOIN cases c ON c.case_id=ca.case_id
-            WHERE c.state NOT IN ('resolved','false-positive')
-            ORDER BY a.timestamp DESC
-            LIMIT 500
-            """
-        ).fetchall()
+        rows = _sqlite_candidate_rows(
+            conn,
+            alert,
+            window_minutes=window_minutes,
+        )
         candidates = [
             (row["case_id"], _row_to_alert(row))
             for row in rows
@@ -431,20 +509,14 @@ def _pg_decide_and_store(
                     ),
                 )
 
-            cur.execute(
-                """
-                SELECT ca.case_id, a.*
-                FROM case_alerts ca
-                JOIN alerts a ON a.alert_id=ca.alert_id
-                JOIN cases c ON c.case_id=ca.case_id
-                WHERE c.state NOT IN ('resolved','false-positive')
-                ORDER BY a.timestamp DESC
-                LIMIT 500
-                """
+            rows = _pg_candidate_rows(
+                cur,
+                alert,
+                window_minutes=window_minutes,
             )
             candidates = [
                 (row["case_id"], _row_to_alert(row))
-                for row in cur.fetchall()
+                for row in rows
             ]
             case_id, correlation = _best_match(
                 alert,
