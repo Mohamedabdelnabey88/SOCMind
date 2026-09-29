@@ -82,6 +82,25 @@ CREATE TABLE IF NOT EXISTS case_alerts (
     FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE,
     FOREIGN KEY(alert_id) REFERENCES alerts(alert_id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS evidence_requests (
+    request_id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    source TEXT NOT NULL,
+    target TEXT,
+    rationale TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    assigned_to TEXT,
+    due_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    fulfilled_at TEXT,
+    response_summary TEXT,
+    evidence_reference TEXT,
+    FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+);
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority,state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
 CREATE INDEX IF NOT EXISTS idx_notes_case ON case_notes(case_id,created_at);
@@ -89,6 +108,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_case ON case_audit(case_id,timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_host_user ON alerts(host,user);
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_requests_case ON evidence_requests(case_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requests_status ON evidence_requests(status,due_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_requests_open_key
+ON evidence_requests(case_id,key)
+WHERE status IN ('pending','in-progress');
 """
 
 
@@ -300,7 +324,20 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 item["correlation_reasons"] = json.loads(item["correlation_reasons"])
             except (TypeError, json.JSONDecodeError):
                 item["correlation_reasons"] = []
-    return {"case": case, "notes": notes, "audit": audit, "alerts": alerts}
+        evidence_requests = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT * FROM evidence_requests WHERE case_id=? ORDER BY created_at",
+                (case_id,),
+            ).fetchall()
+        ]
+    return {
+        "case": case,
+        "notes": notes,
+        "audit": audit,
+        "alerts": alerts,
+        "evidence_requests": evidence_requests,
+    }
 
 
 def list_cases(
