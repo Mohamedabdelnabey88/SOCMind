@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — v1.6 Live Evidence Collector
+
+- derive live evidence queries from alerts already linked to a case
+- collect surrounding telemetry from Elastic or Wazuh Indexer/OpenSearch-compatible APIs
+- normalize live search hits through the same ECS adapter used for offline ingestion
+- merge live results into the existing case evidence package
+- journal provider, source index, time window, generated query, status and event count
+- preserve provider failures as explicit failed collection records
+- surface collection history in case detail and the unified operational timeline
+- support SQLite and PostgreSQL case stores
+- keep TLS verification enabled by default and credentials in environment variables
+
+
 ## 1.6.0 — Production SOC Operations — Milestone 1
 
 - Wazuh/Elastic alert promotion into operational SOC cases
