@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 
@@ -110,4 +111,43 @@ def test_weak_similarity_does_not_merge_unrelated_alerts(tmp_path):
 
     assert a.case_id != b.case_id
     assert b.created is True
-    assert b.correlation_score == 30
+    assert b.correlation_score == 0
+    assert b.correlation_reasons[0]["key"] == "new-case"
+
+
+def test_concurrent_correlated_alerts_collapse_into_one_sqlite_case(tmp_path):
+    db = tmp_path / "soc.db"
+    evidence_dir = tmp_path / "evidence"
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+    base = events[0]
+
+    alerts = [
+        AlertRecord(
+            f"CONCURRENT-{idx}",
+            "wazuh",
+            base.timestamp + timedelta(seconds=idx),
+            f"Concurrent alert {idx}",
+            10,
+            base.host,
+            user=base.user,
+            src_ip=base.src_ip,
+            rule_id=f"RULE-{idx}",
+        )
+        for idx in (1, 2)
+    ]
+
+    def run(alert):
+        return orchestrate_alert_sqlite(
+            db,
+            alert,
+            events,
+            evidence_dir=evidence_dir,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run, alerts))
+
+    assert len({item.case_id for item in results}) == 1
+    assert sum(1 for item in results if item.created) == 1
+    detail = case_detail(db, results[0].case_id)
+    assert len(detail["alerts"]) == 2
