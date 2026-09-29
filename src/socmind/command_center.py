@@ -476,6 +476,7 @@ def command_center_snapshot(
             "p1_active": sum(1 for c in active_all if c.priority == "P1"),
             "unassigned": sum(1 for c in active_all if not c.owner),
             "sla_breached": len(breached),
+            "sla_paused": sum(1 for c in active_all if c.state in PAUSED_STATES),
             "resolved": len(resolved),
             "mtta_minutes": round(sum(mtta_values) / len(mtta_values), 1) if mtta_values else None,
             "mttr_minutes": round(sum(mttr_values) / len(mttr_values), 1) if mttr_values else None,
