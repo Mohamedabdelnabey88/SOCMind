@@ -55,6 +55,10 @@ def _unique(values) -> list[str]:
     return sorted({str(value) for value in values if value not in (None, "")})
 
 
+def _process_basename(value: str) -> str:
+    return str(value).replace("\\", "/").rsplit("/", 1)[-1]
+
+
 def build_collection_plan(
     case: dict,
     alerts: list[dict],
@@ -77,7 +81,7 @@ def build_collection_plan(
         "host.name": _unique(item.get("host") for item in alerts),
         "user.name": _unique(item.get("user") for item in alerts),
         "process.name": _unique(
-            Path(str(item.get("process"))).name
+            _process_basename(str(item.get("process")))
             for item in alerts
             if item.get("process")
         ),
@@ -301,7 +305,7 @@ def collect_case_evidence_sqlite(
             index,
             query=plan.query,
             size=max(1, min(int(max_events), 10000)),
-            sort=[{"@timestamp": {"order": "asc"}}, {"_id": {"order": "asc"}}],
+            sort=[{"@timestamp": {"order": "asc"}}],
         )
         hits = response.get("hits", {}).get("hits", [])
         events: list[Event] = parse_elastic_hits(hits)
@@ -369,7 +373,7 @@ def collect_case_evidence_postgres(
             index,
             query=plan.query,
             size=max(1, min(int(max_events), 10000)),
-            sort=[{"@timestamp": {"order": "asc"}}, {"_id": {"order": "asc"}}],
+            sort=[{"@timestamp": {"order": "asc"}}],
         )
         hits = response.get("hits", {}).get("hits", [])
         events: list[Event] = parse_elastic_hits(hits)
