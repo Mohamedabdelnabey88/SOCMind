@@ -76,8 +76,8 @@ def authenticate(
         if not subject:
             raise PermissionError("OIDC session subject is missing")
         if config.oidc_issuer:
-            expected_issuer = config.oidc_issuer.rstrip("/")
-            session_issuer = str(payload.get("iss") or "").rstrip("/")
+            expected_issuer = str(config.oidc_issuer).strip()
+            session_issuer = str(payload.get("iss") or "").strip()
             if not session_issuer or not secrets.compare_digest(
                 session_issuer,
                 expected_issuer,
