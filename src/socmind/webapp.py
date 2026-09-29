@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 from .audit_chain import append_record, verify_chain
@@ -30,6 +31,81 @@ from .replay import replay_payload
 from .similarity import similarity_payload, similarity_payload_pg
 from .whatif import compare_rule_packs
 
+
+
+def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
+    items: list[dict] = []
+    case = detail.get("case") or {}
+    opened_at = case.get("opened_at")
+    if opened_at:
+        items.append({
+            "timestamp": opened_at,
+            "kind": "case",
+            "title": "Case opened",
+            "detail": f"{case.get('priority', 'P3')} · {case.get('source') or 'unknown source'}",
+        })
+
+    for alert in detail.get("alerts") or []:
+        items.append({
+            "timestamp": alert.get("timestamp"),
+            "kind": "alert",
+            "title": alert.get("title") or alert.get("alert_id") or "Alert",
+            "detail": (
+                f"{alert.get('source') or 'unknown'} · severity {alert.get('severity', '—')} · "
+                f"correlation {alert.get('correlation_score', 0)}"
+            ),
+        })
+
+    for note in detail.get("notes") or []:
+        items.append({
+            "timestamp": note.get("created_at"),
+            "kind": "analyst-note",
+            "title": f"Analyst note · {note.get('author') or 'unknown'}",
+            "detail": note.get("text") or "",
+        })
+
+    for audit in detail.get("audit") or []:
+        items.append({
+            "timestamp": audit.get("timestamp"),
+            "kind": "case-action",
+            "title": audit.get("action") or "Case action",
+            "detail": f"{audit.get('actor') or 'unknown'} · {audit.get('detail') or ''}",
+        })
+
+    if investigation and not investigation.get("error"):
+        for event in investigation.get("timeline") or []:
+            items.append({
+                "timestamp": event.get("timestamp"),
+                "kind": "evidence",
+                "title": (
+                    f"{event.get('host') or 'unknown'} · "
+                    f"{event.get('source') or 'unknown'} · "
+                    f"{event.get('event_id') or 'event'}"
+                ),
+                "detail": (
+                    event.get("command_line")
+                    or event.get("process")
+                    or event.get("dst_ip")
+                    or event.get("src_ip")
+                    or event.get("user")
+                    or ""
+                ),
+            })
+
+    def sort_key(item: dict):
+        value = item.get("timestamp")
+        if not value:
+            return datetime.min
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                return parsed.replace(tzinfo=None)
+            return parsed
+        except ValueError:
+            return datetime.min
+
+    items.sort(key=sort_key)
+    return items
 
 def create_app(
     events_path: str | Path,
@@ -64,7 +140,7 @@ def create_app(
     assets = Path(__file__).with_name("web")
     app = FastAPI(
         title="SOCMind Enterprise SOC Workspace",
-        version="1.5.0",
+        version="1.6.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
@@ -279,7 +355,11 @@ def create_app(
                 )
             except Exception as exc:
                 investigation = {"error": str(exc)}
-        return {**detail, "investigation": investigation}
+        return {
+            **detail,
+            "investigation": investigation,
+            "case_timeline": _case_timeline(detail, investigation),
+        }
 
     @app.post("/api/cases/{target_case_id}/acknowledge")
     def acknowledge(
