@@ -36,6 +36,7 @@ from .enterprise_auth import trusted_proxy_headers
 from .enterprise_ops import backup_sqlite, postgres_schema, render_retention, retention_scan
 from .engine import analyze
 from .enrichment import LocalIntelProvider, enrich_iocs
+from .evidence_requests import suggestion_payload
 from .escalation import export_escalation_package
 from .graph import render_mermaid
 from .helptext import render_help
@@ -411,6 +412,13 @@ def build_parser() -> argparse.ArgumentParser:
     pg_health = sub.add_parser("postgres-health", help="Check PostgreSQL enterprise readiness")
     pg_health.add_argument("--dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN environment variable")
     pg_health.add_argument("--json", action="store_true")
+
+    evidence_suggest = sub.add_parser(
+        "evidence-suggest",
+        help="Suggest actionable evidence requests from investigation validation gaps",
+    )
+    evidence_suggest.add_argument("events")
+    evidence_suggest.add_argument("--json", action="store_true")
 
     alert_ops = sub.add_parser(
         "alert-orchestrate",
@@ -969,6 +977,22 @@ def main() -> None:
                 limit=args.limit,
                 exclude_case_id=args.exclude_case_id,
             ))
+        return
+
+    if args.command == "evidence-suggest":
+        payload = suggestion_payload(load_jsonl(args.events))
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print("SOCMind Evidence Request Suggestions")
+            print("====================================")
+            if not payload["suggestions"]:
+                print("No additional evidence requests suggested.")
+            for item in payload["suggestions"]:
+                target = f" · target={item['target']}" if item.get("target") else ""
+                print(f"{item['key']} | {item['source']}{target}")
+                print(f"  {item['title']}")
+                print(f"  {item['rationale']}")
         return
 
     if args.command == "alert-orchestrate":
