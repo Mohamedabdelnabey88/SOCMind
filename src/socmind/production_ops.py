@@ -156,6 +156,57 @@ def collect_evidence_window(
     )
 
 
+
+def _elastic_severity(source: dict) -> int:
+    raw = source.get("kibana.alert.severity")
+    mapping = {"low": 3, "medium": 7, "high": 10, "critical": 13}
+    if isinstance(raw, str) and raw.lower() in mapping:
+        return mapping[raw.lower()]
+
+    risk = source.get("kibana.alert.risk_score")
+    try:
+        risk_value = float(risk)
+    except (TypeError, ValueError):
+        risk_value = None
+    if risk_value is not None:
+        if risk_value >= 74:
+            return 13
+        if risk_value >= 48:
+            return 10
+        if risk_value >= 22:
+            return 7
+        return 3
+
+    rule = source.get("rule") if isinstance(source.get("rule"), dict) else {}
+    signal = source.get("signal") if isinstance(source.get("signal"), dict) else {}
+    signal_rule = signal.get("rule") if isinstance(signal.get("rule"), dict) else {}
+    severity_raw = rule.get("severity") or signal_rule.get("severity")
+    try:
+        return int(severity_raw or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _elastic_technique(source: dict) -> str | None:
+    threat = source.get("kibana.alert.rule.threat")
+    if isinstance(threat, list):
+        for item in threat:
+            if not isinstance(item, dict):
+                continue
+            techniques = item.get("technique")
+            if isinstance(techniques, list):
+                for technique in techniques:
+                    if isinstance(technique, dict) and technique.get("id"):
+                        return str(technique["id"]).upper()
+
+    tags = source.get("tags") or []
+    if isinstance(tags, str):
+        tags = [tags]
+    return next(
+        (str(item).upper().replace("ATTACK.", "") for item in tags if str(item).lower().startswith("attack.t")),
+        None,
+    )
+
 def alert_from_event(event: Event) -> AlertRecord:
     data = event.data or {}
     if event.source == "wazuh":
@@ -167,9 +218,17 @@ def alert_from_event(event: Event) -> AlertRecord:
         alert_id = None
         if isinstance(raw, dict):
             alert_id = raw.get("id")
-            groups = (raw.get("rule") or {}).get("groups") or []
+            raw_rule = raw.get("rule") or {}
+            groups = raw_rule.get("groups") or []
+            mitre = raw_rule.get("mitre") if isinstance(raw_rule.get("mitre"), dict) else {}
+            mitre_ids = mitre.get("id") or []
+            if isinstance(mitre_ids, str):
+                mitre_ids = [mitre_ids]
             technique = next(
-                (str(item).upper() for item in groups if str(item).lower().startswith("attack.t")),
+                (str(item).upper() for item in mitre_ids if str(item).upper().startswith("T")),
+                None,
+            ) or next(
+                (str(item).upper().replace("ATTACK.", "") for item in groups if str(item).lower().startswith("attack.t")),
                 None,
             )
         return AlertRecord(
@@ -189,21 +248,20 @@ def alert_from_event(event: Event) -> AlertRecord:
 
     ecs = data.get("ecs") if isinstance(data.get("ecs"), dict) else {}
     rule = ecs.get("rule") if isinstance(ecs.get("rule"), dict) else {}
-    signal = ecs.get("signal") if isinstance(ecs.get("signal"), dict) else {}
-    signal_rule = signal.get("rule") if isinstance(signal.get("rule"), dict) else {}
-    severity_raw = rule.get("severity") or signal_rule.get("severity")
-    try:
-        severity = int(severity_raw or 0)
-    except (TypeError, ValueError):
-        severity = 0
 
-    rule_id = str(rule.get("id") or event.event_id)
-    title = str(rule.get("name") or f"Elastic alert {rule_id}")
-    tags = ecs.get("tags") or []
-    technique = next(
-        (str(item).upper() for item in tags if str(item).lower().startswith("attack.t")),
-        None,
+    severity = _elastic_severity(ecs)
+    rule_id = str(
+        ecs.get("kibana.alert.rule.rule_id")
+        or ecs.get("kibana.alert.rule.uuid")
+        or rule.get("id")
+        or event.event_id
     )
+    title = str(
+        ecs.get("kibana.alert.rule.name")
+        or rule.get("name")
+        or f"Elastic alert {rule_id}"
+    )
+    technique = _elastic_technique(ecs)
     alert_id = str(
         data.get("elastic_id")
         or ecs.get("_id")
