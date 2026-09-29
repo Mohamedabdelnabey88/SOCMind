@@ -168,5 +168,29 @@ CREATE INDEX IF NOT EXISTS idx_alerts_dst_time ON alerts(dst_ip, timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_rule_time ON alerts(LOWER(rule_id), timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_technique_time ON alerts(LOWER(technique), timestamp);
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
+CREATE TABLE IF NOT EXISTS evidence_requirements (
+  requirement_id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  source TEXT NOT NULL,
+  target TEXT,
+  rationale TEXT NOT NULL,
+  status TEXT NOT NULL,
+  requested_by TEXT NOT NULL,
+  assigned_to TEXT,
+  due_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  received_at TIMESTAMPTZ,
+  response_summary TEXT,
+  evidence_reference TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_evidence_collections_case ON evidence_collections(case_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requirements_case ON evidence_requirements(case_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requirements_status ON evidence_requirements(status, due_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_requirements_open_key
+ON evidence_requirements(case_id, key)
+WHERE status IN ('required','requested');
 """
