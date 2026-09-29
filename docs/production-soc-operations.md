@@ -159,3 +159,51 @@ This milestone does not yet claim:
 Those are subsequent v1.6 production-operations milestones.
 
 The current milestone establishes the case-orchestration core they can safely build on.
+
+
+## Milestone 2 — Evidence Requests & Advanced Case Lifecycle
+
+SOCMind now turns investigation validation gaps into operational evidence work.
+
+```text
+Validation Gap
+      ↓
+Evidence Suggestion
+      ↓
+Tracked Evidence Request
+      ↓
+Assigned Team / Due Time
+      ↓
+Pending → In Progress → Fulfilled
+      ↓
+Evidence Reference + Response Summary
+      ↓
+Investigation Re-evaluation
+```
+
+Generate suggestions from normalized case evidence:
+
+```bash
+socmind evidence-suggest examples/attack_chain.jsonl --json
+```
+
+The web case workspace can create suggested requests automatically. Open requests are idempotent per case/key, so repeatedly generating suggestions does not create duplicate work items.
+
+Request states:
+
+- `pending`
+- `in-progress`
+- `fulfilled`
+- `cancelled`
+
+Terminal requests cannot be reopened.
+
+Case lifecycle now includes:
+
+- `waiting-for-evidence`
+- `waiting-for-user`
+- `monitoring`
+
+The Command Center reports open and overdue evidence requests at both shift and case level.
+
+Evidence requests are supported in SQLite and PostgreSQL, are RBAC protected, and create case-audit events. Fulfilled requests can record a response summary and evidence URI/reference.
