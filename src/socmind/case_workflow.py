@@ -39,6 +39,7 @@ ALLOWED = {
     "waiting-for-evidence": {
         "triage",
         "investigating",
+        "waiting-for-user",
         "monitoring",
         "resolved",
         "false-positive",
@@ -46,6 +47,7 @@ ALLOWED = {
     "waiting-for-user": {
         "triage",
         "investigating",
+        "waiting-for-evidence",
         "monitoring",
         "resolved",
         "false-positive",
