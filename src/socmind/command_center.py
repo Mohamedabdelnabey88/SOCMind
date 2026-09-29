@@ -449,6 +449,19 @@ def command_center_snapshot(
         closed = datetime.fromisoformat(case.updated_at.replace("Z", "+00:00"))
         mttr_values.append(max(0, int((closed - opened).total_seconds() // 60)))
 
+    with connect(db_path) as conn:
+        request_counts = conn.execute(
+            """
+            SELECT
+              SUM(CASE WHEN status IN ('open','in-progress') THEN 1 ELSE 0 END) AS open_count,
+              SUM(CASE WHEN status IN ('open','in-progress') AND due_at IS NOT NULL AND due_at < ? THEN 1 ELSE 0 END) AS overdue_count
+            FROM evidence_requests
+            """,
+            (datetime.now(timezone.utc).isoformat(),),
+        ).fetchone()
+    open_evidence_requests = int(request_counts["open_count"] or 0)
+    overdue_evidence_requests = int(request_counts["overdue_count"] or 0)
+
     active_filtered = [c for c in cases if c.state not in {"resolved", "false-positive"}]
     sla_by_case = {
         c.case_id: evaluate_sla(c.opened_at, priority=c.priority)
@@ -464,6 +477,10 @@ def command_center_snapshot(
             "unassigned": sum(1 for c in active_all if not c.owner),
             "sla_breached": len(breached),
             "resolved": len(resolved),
+            "waiting_for_evidence": sum(1 for c in active_all if c.state == "waiting-for-evidence"),
+            "waiting_for_user": sum(1 for c in active_all if c.state == "waiting-for-user"),
+            "open_evidence_requests": open_evidence_requests,
+            "overdue_evidence_requests": overdue_evidence_requests,
             "mtta_minutes": round(sum(mtta_values) / len(mtta_values), 1) if mtta_values else None,
             "mttr_minutes": round(sum(mttr_values) / len(mttr_values), 1) if mttr_values else None,
         },
