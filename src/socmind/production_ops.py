@@ -56,6 +56,13 @@ def alert_priority(severity: int) -> str:
     return "P3"
 
 
+def case_id_for_alert(alert: AlertRecord) -> str:
+    digest = hashlib.sha256(
+        f"{alert.source}|{alert.alert_id}".encode("utf-8")
+    ).hexdigest()[:8].upper()
+    return f"INC-{alert.timestamp:%Y%m%d}-{digest}"
+
+
 def alert_fingerprint(alert: AlertRecord) -> str:
     normalized = "|".join(
         [
