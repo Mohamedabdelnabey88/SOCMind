@@ -44,42 +44,38 @@ socmind alert-orchestrate elastic elastic-alerts.ndjson \
   --json
 ```
 
-## Live alert ingestion
+## Live alert pull
 
-SOCMind can pull active alerts directly from an Elasticsearch-compatible search API and immediately feed them into the same idempotent orchestration pipeline used by file ingestion.
-
-### Elastic Security
+Elastic Security alert alias:
 
 ```bash
 export ELASTIC_API_KEY='...'
 
-socmind alert-live elastic https://elastic.internal:9200 \
+socmind alert-live elastic https://elastic:9200 \
   .alerts-security.alerts-default \
   --database socmind.db \
   --evidence-dir socmind-evidence \
   --json
 ```
 
-The parser understands current Elastic Security alert metadata including `kibana.alert.rule.*`, `kibana.alert.severity`, `kibana.alert.risk_score`, and ATT&CK technique metadata.
-
-### Wazuh Indexer
+Wazuh Indexer:
 
 ```bash
-export WAZUH_INDEXER_USER='...'
+export WAZUH_INDEXER_USERNAME='...'
 export WAZUH_INDEXER_PASSWORD='...'
 
-socmind alert-live wazuh-indexer https://wazuh-indexer.internal:9200 \
+socmind alert-live wazuh-indexer https://wazuh-indexer:9200 \
   'wazuh-alerts*' \
   --database socmind.db \
   --evidence-dir socmind-evidence \
   --json
 ```
 
-`WAZUH_INDEXER_JWT` is also supported. Wazuh Indexer credentials are isolated from Elastic credentials.
+JWT is also supported through `WAZUH_INDEXER_JWT`.
 
-The live command requires no temporary export file. Returned search hits are normalized in memory and passed directly through duplicate detection, explainable correlation, case creation/attachment, priority escalation and evidence-window collection.
+The live path queries the search API and feeds returned hits directly into the same duplicate/correlation/case/evidence pipeline used by file orchestration. No temporary export file is required.
 
-TLS verification is enabled by default. `--insecure` is intended only for controlled lab environments.
+TLS certificate verification is enabled by default. `--insecure` is intended only for controlled lab systems with self-signed certificates.
 
 ## Correlation model
 
@@ -95,9 +91,12 @@ SOCMind currently scores explainable alert overlap using:
 
 Default merge threshold: `55`.
 
-The score alone does not trigger an automatic merge. Same-host correlation also requires shared user, process, source IP, or destination IP context; cross-host correlation requires multiple shared context anchors. Rule/ATT&CK similarity can strengthen a score but cannot justify automatic merging by itself.
+The score alone does not trigger an automatic merge. SOCMind also applies a conservative context-anchor policy:
 
-Candidate lookup is bounded by the correlation time window and shared context before scoring, so unrelated alert floods do not hide relevant active cases.
+- same host must be accompanied by at least one shared user, process, source IP, or destination IP; or
+- cross-host correlation requires at least two shared context anchors among user, process, source IP, and destination IP.
+
+Rule/technique similarity can strengthen a correlation score, but by itself it cannot justify automatic case merging. This intentionally prefers a false split over a false merge when evidence is weak.
 
 Default correlation time window: `15 minutes`.
 
@@ -109,6 +108,8 @@ Both are configurable:
 ```
 
 The score is deterministic correlation evidence. It is **not attacker attribution** and it is not a probability that two alerts share a root cause.
+
+Candidate lookup is bounded by both the correlation time window and shared context anchors before scoring. This avoids a global “last N alerts” scan and keeps relevant cases discoverable during unrelated alert floods.
 
 ## Outcomes
 
@@ -200,102 +201,3 @@ This milestone does not yet claim:
 Those are subsequent v1.6 production-operations milestones.
 
 The current milestone establishes the case-orchestration core they can safely build on.
-
-
-## Milestone 2 — Live Evidence Collector
-
-SOCMind can now use the alerts already linked to a case to build an auditable live evidence query against an Elasticsearch-compatible backend.
-
-Supported provider modes:
-
-- `elastic`
-- `wazuh-indexer` (Elasticsearch/OpenSearch-compatible Wazuh Indexer API)
-
-The collector derives:
-
-- earliest/latest linked-alert timestamp
-- configurable before/after collection window
-- hosts
-- users
-- processes
-- source IPs
-- destination IPs
-
-It then builds a bounded query and merges normalized results into the case evidence package.
-
-### Elastic
-
-```bash
-export ELASTIC_API_KEY='...'
-
-socmind case-collect-evidence INC-2026-001 \
-  elastic \
-  https://elastic.internal:9200 \
-  'logs-*' \
-  --database socmind.db \
-  --evidence-dir evidence
-```
-
-PostgreSQL:
-
-```bash
-export SOCMIND_POSTGRES_DSN='postgresql://socmind:password@db:5432/socmind'
-export ELASTIC_API_KEY='...'
-
-socmind case-collect-evidence INC-2026-001 \
-  elastic \
-  https://elastic.internal:9200 \
-  'logs-*' \
-  --postgres-dsn "$SOCMIND_POSTGRES_DSN" \
-  --evidence-dir /var/lib/socmind/evidence
-```
-
-### Wazuh Indexer
-
-```bash
-export WAZUH_INDEXER_USER='socmind'
-export WAZUH_INDEXER_PASSWORD='...'
-
-socmind case-collect-evidence INC-2026-001 \
-  wazuh-indexer \
-  https://wazuh-indexer.internal:9200 \
-  'wazuh-alerts-*' \
-  --database socmind.db \
-  --evidence-dir evidence
-```
-
-TLS verification is on by default. `--insecure` is intended only for controlled lab environments using self-signed certificates.
-
-### Collection journal
-
-Every live collection records:
-
-- collection ID
-- case ID
-- provider
-- source index/pattern
-- exact time window
-- exact generated query
-- started/completed timestamps
-- status
-- event count
-- provider error, if any
-
-Collection success/failure also appears in the case audit trail and the unified case timeline.
-
-Provider failure is never silently treated as an empty successful result.
-
-### Query semantics
-
-SOCMind uses the linked alerts as investigation context rather than issuing an unbounded search.
-
-The query always filters by the case alert time window and, when available, requires at least one matching identity signal from:
-
-- `host.name`
-- `user.name`
-- `process.name`
-- `process.executable`
-- `source.ip`
-- `destination.ip`
-
-This is evidence collection for investigation context. It is not an attribution engine and does not automatically determine case disposition.
