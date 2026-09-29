@@ -180,10 +180,14 @@ def transition_case_pg(
     target: str,
     *,
     actor: str = "analyst",
+    reason: str | None = None,
 ) -> None:
     actor = actor.strip() or "analyst"
     if len(actor) > 120:
         raise ValueError("Actor must be 120 characters or fewer")
+    clean_reason = str(reason or "").strip()
+    if len(clean_reason) > 1000:
+        raise ValueError("Transition reason must be 1000 characters or fewer")
     now = datetime.now(timezone.utc)
     with _connect(dsn) as conn:
         with conn.cursor() as cur:
@@ -217,12 +221,15 @@ def transition_case_pg(
                 """,
                 (target, now, paused_at, paused_seconds, case_id),
             )
+            detail = f"{current} -> {target}"
+            if clean_reason:
+                detail += f" | reason: {clean_reason}"
             cur.execute(
                 """
                 INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
                 VALUES(%s,%s,%s,%s,%s)
                 """,
-                (case_id, actor, "state-transition", f"{current} -> {target}", now),
+                (case_id, actor, "state-transition", detail, now),
             )
         conn.commit()
 
@@ -283,6 +290,10 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
                 (case_id,),
             )
             audit = cur.fetchall()
+            state_history = [
+                row for row in audit
+                if row.get("action") == "state-transition"
+            ]
             cur.execute(
                 """
                 SELECT
@@ -343,6 +354,7 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
         "case": case_payload,
         "notes": notes,
         "audit": audit,
+        "state_history": state_history,
         "alerts": alerts,
         "evidence_collections": collections,
         "evidence_requirements": requirements,
