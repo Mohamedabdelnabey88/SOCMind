@@ -71,7 +71,7 @@ async function loadCommandCenter(){
     }
     q("#commandState").textContent="Live local queue";
     const s=commandPayload.summary;
-    const metrics=[["Active Cases",s.active],["P1 Active",s.p1_active],["SLA Breaches",s.sla_breached],["Unassigned",s.unassigned],["MTTA",s.mtta_minutes==null?"—":s.mtta_minutes+"m"],["MTTR",s.mttr_minutes==null?"—":s.mttr_minutes+"m"]];
+    const metrics=[["Active Cases",s.active],["P1 Active",s.p1_active],["SLA Breaches",s.sla_breached],["SLA Paused",s.sla_paused||0],["Unassigned",s.unassigned],["MTTA",s.mtta_minutes==null?"—":s.mtta_minutes+"m"],["MTTR",s.mttr_minutes==null?"—":s.mttr_minutes+"m"]];
     q("#commandCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
     q("#caseQueue").innerHTML=commandPayload.queue.map(item=>{
       let sla="Closed";if(item.sla)sla=item.sla.breached?(item.sla.paused?'<span class="sla-breach">BREACHED · PAUSED</span>':'<span class="sla-breach">BREACHED</span>'):item.sla.paused?'<span class="chip">PAUSED · '+esc(item.sla.remaining_minutes+"m")+'</span>':esc(item.sla.remaining_minutes+"m");
