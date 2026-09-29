@@ -18,6 +18,13 @@ VALID_REQUEST_STATUSES = (
     "cancelled",
 )
 
+ALLOWED_REQUEST_TRANSITIONS = {
+    "pending": {"in-progress", "fulfilled", "cancelled"},
+    "in-progress": {"fulfilled", "cancelled"},
+    "fulfilled": set(),
+    "cancelled": set(),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class EvidenceSuggestion:
@@ -156,6 +163,64 @@ def suggestion_payload(events: list[Event]) -> dict:
     }
 
 
+
+def _clean_required(value: str, field: str, *, max_length: int) -> str:
+    clean = str(value or "").strip()
+    if not clean:
+        raise ValueError(f"{field} cannot be empty")
+    if len(clean) > max_length:
+        raise ValueError(f"{field} must be {max_length} characters or fewer")
+    return clean
+
+
+def _validate_create_fields(
+    *,
+    key: str,
+    title: str,
+    source: str,
+    target: str | None,
+    rationale: str,
+    requested_by: str,
+    assigned_to: str | None,
+    due_hours: int | None,
+) -> tuple[str, str, str, str | None, str, str, str | None, int | None]:
+    clean_key = _clean_required(key, "key", max_length=120)
+    clean_title = _clean_required(title, "title", max_length=240)
+    clean_source = _clean_required(source, "source", max_length=120)
+    clean_rationale = _clean_required(rationale, "rationale", max_length=2000)
+    clean_requested_by = _clean_required(
+        requested_by, "requested_by", max_length=120
+    )
+    clean_target = str(target).strip() if target is not None else None
+    if clean_target and len(clean_target) > 240:
+        raise ValueError("target must be 240 characters or fewer")
+    clean_assigned = str(assigned_to).strip() if assigned_to is not None else None
+    if clean_assigned and len(clean_assigned) > 120:
+        raise ValueError("assigned_to must be 120 characters or fewer")
+    if due_hours is not None:
+        due_hours = int(due_hours)
+        if due_hours < 1 or due_hours > 24 * 30:
+            raise ValueError("due_hours must be between 1 and 720")
+    return (
+        clean_key,
+        clean_title,
+        clean_source,
+        clean_target,
+        clean_rationale,
+        clean_requested_by,
+        clean_assigned,
+        due_hours,
+    )
+
+
+def _validate_transition(current: str, target: str) -> str:
+    target = _validate_status(target)
+    if target == current:
+        return target
+    if target not in ALLOWED_REQUEST_TRANSITIONS.get(current, set()):
+        raise ValueError(f"Invalid evidence request transition: {current} -> {target}")
+    return target
+
 def _validate_status(status: str) -> str:
     value = status.strip().lower()
     if value not in VALID_REQUEST_STATUSES:
@@ -184,6 +249,19 @@ def create_request_sqlite(
     assigned_to: str | None = None,
     due_hours: int | None = 4,
 ) -> str:
+    (
+        key, title, source, target, rationale, requested_by,
+        assigned_to, due_hours,
+    ) = _validate_create_fields(
+        key=key,
+        title=title,
+        source=source,
+        target=target,
+        rationale=rationale,
+        requested_by=requested_by,
+        assigned_to=assigned_to,
+        due_hours=due_hours,
+    )
     now = datetime.now(timezone.utc).isoformat()
     request_id = str(uuid4())
     with connect(db_path) as conn:
@@ -246,9 +324,7 @@ def update_request_sqlite(
     evidence_reference: str | None = None,
     assigned_to: str | None = None,
 ) -> str:
-    value = _validate_status(status)
     now = datetime.now(timezone.utc).isoformat()
-    fulfilled = now if value == "fulfilled" else None
     with connect(db_path) as conn:
         row = conn.execute(
             "SELECT * FROM evidence_requests WHERE request_id=?",
@@ -256,6 +332,8 @@ def update_request_sqlite(
         ).fetchone()
         if row is None:
             raise ValueError(f"Unknown evidence request: {request_id}")
+        value = _validate_transition(str(row["status"]), status)
+        fulfilled = now if value == "fulfilled" else row["fulfilled_at"]
         conn.execute(
             """
             UPDATE evidence_requests
@@ -302,6 +380,19 @@ def create_request_pg(
     assigned_to: str | None = None,
     due_hours: int | None = 4,
 ) -> str:
+    (
+        key, title, source, target, rationale, requested_by,
+        assigned_to, due_hours,
+    ) = _validate_create_fields(
+        key=key,
+        title=title,
+        source=source,
+        target=target,
+        rationale=rationale,
+        requested_by=requested_by,
+        assigned_to=assigned_to,
+        due_hours=due_hours,
+    )
     now = datetime.now(timezone.utc)
     request_id = str(uuid4())
     with _connect(dsn) as conn:
@@ -379,9 +470,7 @@ def update_request_pg(
     evidence_reference: str | None = None,
     assigned_to: str | None = None,
 ) -> str:
-    value = _validate_status(status)
     now = datetime.now(timezone.utc)
-    fulfilled = now if value == "fulfilled" else None
     with _connect(dsn) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -391,6 +480,8 @@ def update_request_pg(
             row = cur.fetchone()
             if row is None:
                 raise ValueError(f"Unknown evidence request: {request_id}")
+            value = _validate_transition(str(row["status"]), status)
+            fulfilled = now if value == "fulfilled" else row.get("fulfilled_at")
             cur.execute(
                 """
                 UPDATE evidence_requests
