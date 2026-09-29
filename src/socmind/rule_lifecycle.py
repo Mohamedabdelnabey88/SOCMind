@@ -544,7 +544,7 @@ def transition_rule(
         raise ValueError(f"Unknown rule lifecycle status: {target}")
 
     permission = "detection.manage"
-    if target == "approved":
+    if target in {"approved", "deprecated", "retired"}:
         permission = "detection.approve"
     elif target == "production":
         permission = "detection.promote"
