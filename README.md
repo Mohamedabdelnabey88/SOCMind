@@ -131,6 +131,20 @@ socmind case-collect-evidence INC-2026-001 \
 
 The pull is journaled with its provider, index, query, time window, status and event count. Results are normalized and merged into the case evidence package, and collection history is visible in the Case Workspace.
 
+Direct live alert pull is also available:
+
+```bash
+socmind alert-live elastic https://elastic:9200 \
+  .alerts-security.alerts-default \
+  --database socmind.db --json
+
+socmind alert-live wazuh-indexer https://wazuh-indexer:9200 \
+  'wazuh-alerts*' \
+  --database socmind.db --json
+```
+
+Both live and file ingestion use the same deterministic orchestration engine.
+
 Detailed guide: [Production SOC Operations](docs/production-soc-operations.md)
 
 ## v1.5 Enterprise Foundation
