@@ -94,6 +94,7 @@ async function openCase(caseId){
   q("#detailMeta").innerHTML='<span class="priority '+esc(c.priority.toLowerCase())+'">'+esc(c.priority)+'</span><span>'+esc(c.state)+'</span><span>Owner: '+esc(c.owner||"Unassigned")+'</span><span>Source: '+esc(c.source||"—")+'</span><span>Acknowledged: '+esc(c.acknowledged_at||"No")+'</span>'+pauseMeta;
   q("#assignOwner").value=c.owner||"";
   q("#caseNotes").innerHTML=data.notes.map(n=>'<div><b>'+esc(n.author)+'</b><span>'+esc(n.created_at)+'</span><p>'+esc(n.text)+'</p></div>').join("")||"<div>No notes yet.</div>";
+  q("#caseStateHistory").innerHTML=(data.state_history||[]).map(h=>'<div><b>'+esc((h.from_state||"—")+" → "+(h.to_state||"—"))+'</b><span>'+esc(h.actor||"unknown")+' · '+esc(h.timestamp||"—")+'</span><p>'+esc(h.reason||"No explicit reason recorded")+'</p></div>').join("")||"<div>No state transitions yet.</div>";
   q("#caseAudit").innerHTML=data.audit.map(a=>'<div><b>'+esc(a.action)+'</b><span>'+esc(a.actor)+' · '+esc(a.timestamp)+'</span><p>'+esc(a.detail)+'</p></div>').join("")||"<div>No audit entries yet.</div>";
   q("#caseAlerts").innerHTML=(data.alerts||[]).map(a=>{
     const reasons=(a.correlation_reasons||[]).map(r=>'<li>'+esc(r.detail)+' <span>+'+esc(r.weight)+'</span></li>').join("");
