@@ -98,6 +98,35 @@ async function openCase(caseId){
     const technique=a.technique?(' · '+esc(a.technique)):"";
     return '<div><b>'+esc(a.alert_id)+' · '+esc(a.source)+'</b><span>'+esc(a.timestamp)+' · severity '+esc(a.severity)+' · correlation '+esc(a.correlation_score)+rule+technique+'</span><p>'+esc(a.title)+'</p>'+(reasons?'<ul>'+reasons+'</ul>':'<p class="score">Root alert / no correlation reason required.</p>')+'</div>';
   }).join("")||"<div>No orchestrated alerts linked to this case.</div>";
+
+  q("#caseEvidenceRequests").innerHTML=(data.evidence_requests||[]).map(r=>{
+    const due=r.due_at?(' · due '+esc(r.due_at)):"";
+    const assigned=r.assigned_to?(' · '+esc(r.assigned_to)):' · unassigned';
+    const response=r.response_summary?'<p>'+esc(r.response_summary)+'</p>':'';
+    const reference=r.evidence_reference?'<p class="score">Evidence: '+esc(r.evidence_reference)+'</p>':'';
+    let actions='';
+    if(r.status==="pending")actions='<button class="evidence-action" data-request="'+esc(r.request_id)+'" data-status="in-progress">Start</button>';
+    if(r.status==="pending"||r.status==="in-progress")actions+='<button class="evidence-fulfill" data-request="'+esc(r.request_id)+'">Fulfill</button><button class="evidence-action" data-request="'+esc(r.request_id)+'" data-status="cancelled">Cancel</button>';
+    return '<div><b>'+esc(r.title)+' · '+esc(r.status)+'</b><span>'+esc(r.source)+assigned+due+'</span><p>'+esc(r.rationale)+'</p>'+response+reference+'<div class="case-actions">'+actions+'</div></div>';
+  }).join("")||"<div>No evidence requests yet.</div>";
+
+  try{
+    const suggestionRes=await apiFetch("/api/cases/"+encodeURIComponent(caseId)+"/evidence-suggestions");
+    if(suggestionRes.ok){
+      const suggestionData=await suggestionRes.json();
+      q("#caseEvidenceSuggestions").innerHTML=(suggestionData.suggestions||[]).map(s=>
+        '<div><b>'+esc(s.title)+'</b><span>'+esc(s.source)+(s.target?' · '+esc(s.target):'')+'</span><p>'+esc(s.rationale)+'</p></div>'
+      ).join("")||"<div>No additional evidence suggested.</div>";
+    }else q("#caseEvidenceSuggestions").innerHTML="<div>Suggestions unavailable.</div>";
+  }catch(err){q("#caseEvidenceSuggestions").innerHTML="<div>Suggestions unavailable.</div>";}
+
+  qa(".evidence-action").forEach(btn=>btn.addEventListener("click",()=>updateEvidenceRequest(btn.dataset.request,{status:btn.dataset.status})));
+  qa(".evidence-fulfill").forEach(btn=>btn.addEventListener("click",()=>{
+    const summary=prompt("Evidence response summary");
+    if(summary===null)return;
+    const reference=prompt("Evidence reference / URI (optional)")||"";
+    updateEvidenceRequest(btn.dataset.request,{status:"fulfilled",response_summary:summary,evidence_reference:reference});
+  }));
   q("#caseTimeline").innerHTML=(data.case_timeline||[]).map(item=>
     '<div class="event"><time>'+esc(item.timestamp||"—")+'</time><strong>'+esc(item.kind)+' · '+esc(item.title)+'</strong><p>'+esc(item.detail||"")+'</p></div>'
   ).join("")||"<div>No operational timeline entries yet.</div>";
@@ -105,6 +134,37 @@ async function openCase(caseId){
     q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><div class="chips"><span class="chip">'+esc(data.investigation.summary.events)+' events</span><span class="chip">'+esc(data.investigation.summary.findings)+' findings</span><span class="chip">risk '+esc(data.investigation.summary.highest_score)+'</span></div>';
   }else q("#linkedInvestigation").innerHTML='<h3>Linked Evidence</h3><p class="score">'+(c.evidence_path?"Evidence could not be parsed.":"No evidence file linked to this case.")+'</p>';
   q("#caseDetailPanel").scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+
+async function updateEvidenceRequest(requestId,body){
+  const res=await apiFetch("/api/evidence-requests/"+encodeURIComponent(requestId),{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)
+  });
+  if(!res.ok){
+    const e=await res.json().catch(()=>({detail:"Evidence request update failed"}));
+    alert(e.detail||"Evidence request update failed");
+    return;
+  }
+  if(currentCaseId){await openCase(currentCaseId);await loadCommandCenter();}
+}
+
+async function generateEvidenceRequests(){
+  if(!currentCaseId)return;
+  const res=await apiFetch("/api/cases/"+encodeURIComponent(currentCaseId)+"/evidence-requests/suggest",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({due_hours:4})
+  });
+  if(!res.ok){
+    const e=await res.json().catch(()=>({detail:"Evidence request generation failed"}));
+    alert(e.detail||"Evidence request generation failed");
+    return;
+  }
+  await openCase(currentCaseId);
+  await loadCommandCenter();
 }
 
 async function mutateCase(path,body=null){
@@ -119,6 +179,7 @@ q("#ackCase").addEventListener("click",()=>mutateCase("/acknowledge"));
 q("#assignCase").addEventListener("click",()=>{const owner=q("#assignOwner").value.trim();if(owner)mutateCase("/assign",{owner});});
 q("#transitionCase").addEventListener("click",()=>{const state=q("#transitionState").value;if(state)mutateCase("/transition",{state});});
 q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim();if(!text)return;mutateCase("/notes",{text}).then(()=>q("#noteText").value="");});
+q("#generateEvidenceRequests").addEventListener("click",generateEvidenceRequests);
 
 async function loadLeadHealth(){
   try{
