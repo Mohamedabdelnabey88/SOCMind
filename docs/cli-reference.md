@@ -103,7 +103,6 @@ lead-health
 ```text
 alert-orchestrate
 alert-live
-case-collect-evidence
 ```
 
 Workflow help:
