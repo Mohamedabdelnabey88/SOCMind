@@ -1,4 +1,5 @@
 import secrets
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -490,7 +491,7 @@ def create_app(
         response.set_cookie(
             config.session_cookie,
             session_cookie,
-            max_age=max(60, int(session["exp"]) - int(datetime.now().timestamp())),
+            max_age=max(60, int(session["exp"]) - int(time.time())),
             httponly=True,
             secure=not config.allow_insecure_http,
             samesite="lax",
