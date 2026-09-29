@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,34 @@ def _event_payload(event: Event) -> dict:
     }
 
 
+@contextmanager
+def _evidence_lock(path: Path):
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as fh:
+        if fh.seek(0, os.SEEK_END) == 0:
+            fh.write(b"0")
+            fh.flush()
+        fh.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
 def _load_existing_evidence(path: Path) -> list[Event]:
     if not path.is_file():
         return []
@@ -75,22 +104,23 @@ def _load_existing_evidence(path: Path) -> list[Event]:
 
 def _merge_evidence(path: Path, events: list[Event]) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing = _load_existing_evidence(path)
-    merged: dict[tuple, Event] = {
-        _event_key(event): event for event in existing
-    }
-    for event in events:
-        merged[_event_key(event)] = event
+    with _evidence_lock(path):
+        existing = _load_existing_evidence(path)
+        merged: dict[tuple, Event] = {
+            _event_key(event): event for event in existing
+        }
+        for event in events:
+            merged[_event_key(event)] = event
 
-    ordered = sorted(merged.values(), key=lambda item: item.timestamp)
-    temp = path.with_suffix(path.suffix + ".tmp")
-    with temp.open("w", encoding="utf-8") as fh:
-        for event in ordered:
-            fh.write(json.dumps(_event_payload(event), ensure_ascii=False) + "\n")
-        fh.flush()
-        os.fsync(fh.fileno())
-    temp.replace(path)
-    return len(ordered)
+        ordered = sorted(merged.values(), key=lambda item: item.timestamp)
+        temp = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+        with temp.open("w", encoding="utf-8") as fh:
+            for event in ordered:
+                fh.write(json.dumps(_event_payload(event), ensure_ascii=False) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        temp.replace(path)
+        return len(ordered)
 
 
 def _priority_rank(value: str) -> int:
