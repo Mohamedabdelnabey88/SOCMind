@@ -180,6 +180,76 @@ def test_approval_requires_lead_and_all_validation_gates(tmp_path):
     assert production["history"][-1]["to_status"] == "production"
 
 
+def test_production_deprecation_and_retirement_require_lead_authority(tmp_path):
+    registry = tmp_path / "rule-registry.json"
+    _register(registry)
+    transition_rule(
+        registry,
+        RULE_ID,
+        "testing",
+        actor="tier2@example.com",
+        role="senior-analyst",
+        note="Begin validation",
+    )
+    _record_all_gates(registry)
+    transition_rule(
+        registry,
+        RULE_ID,
+        "approved",
+        actor="lead@example.com",
+        role="lead",
+        note="Validation approved",
+    )
+    transition_rule(
+        registry,
+        RULE_ID,
+        "production",
+        actor="lead@example.com",
+        role="lead",
+        note="Production promotion",
+    )
+
+    with pytest.raises(PermissionError):
+        transition_rule(
+            registry,
+            RULE_ID,
+            "deprecated",
+            actor="tier2@example.com",
+            role="senior-analyst",
+            note="T2 must not deprecate production rule",
+        )
+
+    deprecated = transition_rule(
+        registry,
+        RULE_ID,
+        "deprecated",
+        actor="lead@example.com",
+        role="lead",
+        note="Superseded by tuned detection",
+    )
+    assert deprecated["status"] == "deprecated"
+
+    with pytest.raises(PermissionError):
+        transition_rule(
+            registry,
+            RULE_ID,
+            "retired",
+            actor="tier2@example.com",
+            role="senior-analyst",
+            note="T2 must not retire rule",
+        )
+
+    retired = transition_rule(
+        registry,
+        RULE_ID,
+        "retired",
+        actor="lead@example.com",
+        role="lead",
+        note="Retired after replacement validation",
+    )
+    assert retired["status"] == "retired"
+
+
 def test_version_change_requires_semver_and_change_note(tmp_path):
     registry = tmp_path / "rule-registry.json"
     _register(registry)
