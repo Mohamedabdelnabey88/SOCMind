@@ -48,6 +48,8 @@ from .lead_metrics import lead_snapshot
 from .quality_gate import load_checklist, quality_payload, render_quality_review
 from .ioc import extract_iocs
 from .notes import append_note
+from .orchestration import orchestrate_alert_postgres, orchestrate_alert_sqlite
+from .production_ops import alert_from_event
 from .process_tree import render_process_tree
 from .postgres_store import initialize_postgres, postgres_health
 from .provenance import fingerprint
@@ -409,6 +411,22 @@ def build_parser() -> argparse.ArgumentParser:
     pg_health = sub.add_parser("postgres-health", help="Check PostgreSQL enterprise readiness")
     pg_health.add_argument("--dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN environment variable")
     pg_health.add_argument("--json", action="store_true")
+
+    alert_ops = sub.add_parser(
+        "alert-orchestrate",
+        help="Promote Wazuh/Elastic alerts into deduplicated correlated SOC cases",
+    )
+    alert_ops.add_argument("format", choices=["wazuh", "elastic"])
+    alert_ops.add_argument("path", help="Raw Wazuh JSONL or Elastic NDJSON alerts")
+    alert_ops.add_argument(
+        "--evidence",
+        help="Optional normalized JSONL telemetry used for evidence collection; defaults to parsed alert events",
+    )
+    store = alert_ops.add_mutually_exclusive_group(required=True)
+    store.add_argument("--database", help="SQLite command-center database")
+    store.add_argument("--postgres-dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN")
+    alert_ops.add_argument("--evidence-dir", default="socmind-evidence")
+    alert_ops.add_argument("--json", action="store_true")
 
     return parser
 
@@ -947,6 +965,80 @@ def main() -> None:
                 limit=args.limit,
                 exclude_case_id=args.exclude_case_id,
             ))
+        return
+
+    if args.command == "alert-orchestrate":
+        if args.format == "wazuh":
+            alert_events = parse_wazuh_alerts(args.path)
+        else:
+            alert_events = parse_elastic_ndjson(args.path)
+
+        evidence_events = (
+            load_jsonl(args.evidence)
+            if args.evidence
+            else alert_events
+        )
+        dsn = args.postgres_dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
+        results = []
+        for event in alert_events:
+            alert = alert_from_event(event)
+            if args.database:
+                result = orchestrate_alert_sqlite(
+                    args.database,
+                    alert,
+                    evidence_events,
+                    evidence_dir=args.evidence_dir,
+                )
+            else:
+                if not dsn:
+                    raise SystemExit(
+                        "Set SOCMIND_POSTGRES_DSN or pass --postgres-dsn."
+                    )
+                result = orchestrate_alert_postgres(
+                    dsn,
+                    alert,
+                    evidence_events,
+                    evidence_dir=args.evidence_dir,
+                )
+            results.append({
+                "alert_id": alert.alert_id,
+                "title": alert.title,
+                "source": alert.source,
+                "case_id": result.case_id,
+                "created": result.created,
+                "duplicate": result.duplicate,
+                "priority": result.priority,
+                "correlation_score": result.correlation_score,
+                "correlation_reasons": result.correlation_reasons,
+                "evidence_count": result.evidence_count,
+                "evidence_path": result.evidence_path,
+            })
+
+        if args.json:
+            print(json.dumps({
+                "alerts": len(results),
+                "new_cases": sum(1 for item in results if item["created"]),
+                "duplicates": sum(1 for item in results if item["duplicate"]),
+                "results": results,
+            }, indent=2))
+        else:
+            print("SOCMind Alert Orchestration")
+            print("==========================")
+            for item in results:
+                state = (
+                    "DUPLICATE"
+                    if item["duplicate"]
+                    else "NEW CASE"
+                    if item["created"]
+                    else "CORRELATED"
+                )
+                print(
+                    f"{item['alert_id']} | {state} | {item['case_id']} | "
+                    f"{item['priority']} | correlation={item['correlation_score']} | "
+                    f"evidence={item['evidence_count']}"
+                )
+                for reason in item["correlation_reasons"]:
+                    print(f"  - {reason['detail']}")
         return
 
     if args.command == "enterprise-info":
