@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -260,7 +261,29 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 (case_id,),
             ).fetchall()
         ]
-    return {"case": case, "notes": notes, "audit": audit}
+        alerts = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                  a.*,
+                  ca.correlation_score,
+                  ca.correlation_reasons,
+                  ca.linked_at
+                FROM case_alerts ca
+                JOIN alerts a ON a.alert_id=ca.alert_id
+                WHERE ca.case_id=?
+                ORDER BY a.timestamp ASC
+                """,
+                (case_id,),
+            ).fetchall()
+        ]
+        for item in alerts:
+            try:
+                item["correlation_reasons"] = json.loads(item["correlation_reasons"])
+            except (TypeError, json.JSONDecodeError):
+                item["correlation_reasons"] = []
+    return {"case": case, "notes": notes, "audit": audit, "alerts": alerts}
 
 
 def list_cases(
