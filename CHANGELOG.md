@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — v1.6 Advanced Case Lifecycle
+
+- add waiting-for-evidence, waiting-for-user and monitoring operational states
+- enforce explicit lifecycle transition rules across file, SQLite and PostgreSQL case flows
+- pause SLA time only while waiting on evidence or user input
+- accumulate pause duration across waiting-state changes and resume atomically
+- preserve prior SLA breach visibility while paused
+- add migration-safe SQLite/PostgreSQL lifecycle columns and legacy JSON compatibility
+- keep waiting/monitoring cases eligible for active alert correlation
+- expose paused-SLA status and KPI in CLI and web Command Center
+- add lifecycle, migration, pause/resume, web and correlation regression tests
+- harden CI dependency installs against transient package-download failures
+
 ## Unreleased — v1.6 Evidence Integrity
 
 - generate atomic SHA-256 sidecar manifests for case evidence packages
