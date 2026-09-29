@@ -37,7 +37,7 @@ def reset_database():
     initialize_postgres(DSN)
     with psycopg.connect(DSN) as conn:
         with conn.cursor() as cur:
-            cur.execute("TRUNCATE TABLE case_audit, case_notes, cases RESTART IDENTITY CASCADE")
+            cur.execute("TRUNCATE TABLE case_alerts, alerts, case_audit, case_notes, cases RESTART IDENTITY CASCADE")
         conn.commit()
 
 
@@ -72,7 +72,7 @@ def test_postgres_enterprise_store_round_trip():
 
     health = postgres_health(DSN)
     assert health["ready"]
-    assert health["socmind_tables"] == 3
+    assert health["socmind_tables"] == 5
 
 
 def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):
