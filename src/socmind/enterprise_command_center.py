@@ -307,6 +307,15 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
                 (case_id,),
             )
             collections = cur.fetchall()
+            cur.execute(
+                """
+                SELECT * FROM evidence_requirements
+                WHERE case_id=%s
+                ORDER BY created_at ASC
+                """,
+                (case_id,),
+            )
+            requirements = cur.fetchall()
 
     case_payload = dict(case)
     for key in ("opened_at", "updated_at", "acknowledged_at", "sla_paused_at"):
@@ -325,12 +334,18 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
         row["started_at"] = _iso(row.get("started_at"))
         row["completed_at"] = _iso(row.get("completed_at"))
         row["query"] = row.pop("query_json", {})
+    for row in requirements:
+        row["due_at"] = _iso(row.get("due_at"))
+        row["created_at"] = _iso(row.get("created_at"))
+        row["updated_at"] = _iso(row.get("updated_at"))
+        row["received_at"] = _iso(row.get("received_at"))
     return {
         "case": case_payload,
         "notes": notes,
         "audit": audit,
         "alerts": alerts,
         "evidence_collections": collections,
+        "evidence_requirements": requirements,
     }
 
 
@@ -420,6 +435,27 @@ def command_center_snapshot_pg(
         closed = datetime.fromisoformat(case.updated_at.replace("Z", "+00:00"))
         mttr_values.append(max(0, int((closed - opened).total_seconds() // 60)))
 
+    now = datetime.now(timezone.utc)
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT case_id,status,due_at
+                FROM evidence_requirements
+                WHERE status IN ('required','requested')
+                """
+            )
+            requirement_rows = cur.fetchall()
+    requirement_counts: dict[str, dict[str, int]] = {}
+    for row in requirement_rows:
+        bucket = requirement_counts.setdefault(
+            str(row["case_id"]),
+            {"open": 0, "overdue": 0},
+        )
+        bucket["open"] += 1
+        if row.get("due_at") is not None and row["due_at"] < now:
+            bucket["overdue"] += 1
+
     active_filtered = [
         case
         for case in cases
@@ -478,6 +514,10 @@ def command_center_snapshot_pg(
                 "updated_at": case.updated_at,
                 "acknowledged_at": case.acknowledged_at,
                 "has_evidence": bool(case.evidence_path),
+                "evidence_requirements": requirement_counts.get(
+                    case.case_id,
+                    {"open": 0, "overdue": 0},
+                ),
                 "sla": {
                     "breached": sla_by_case[case.case_id].breached,
                     "remaining_minutes": sla_by_case[case.case_id].remaining_minutes,
