@@ -397,6 +397,56 @@ Generation is analyst-triggered. SOCMind does not auto-waive, auto-close, or con
 
 Case detail includes `evidence_requirements`, and the web Case Workspace provides generated/manual requirement controls.
 
+## Milestone 4 — Unified Case Timeline
+
+SOCMind now builds a single deterministic operational timeline for each case from persisted case state plus linked investigation evidence.
+
+Every entry exposes:
+
+```text
+timestamp
+type
+source
+actor
+detail
+```
+
+The timeline currently normalizes:
+
+- evidence-event
+- detection-event
+- alert-received
+- case-created
+- alert-correlated
+- evidence-collected / evidence-collection-failed
+- analyst-acknowledged
+- assignment
+- note
+- evidence-requirement / evidence-requirement-updated
+- state-transition
+- containment
+- resolution / false-positive disposition
+- escalation
+- detection-feedback
+- fallback case-action for auditable operations that do not yet have a dedicated type
+
+Case creation vs alert correlation is determined from the persisted `alert-linked` audit payload rather than inferred from a score. Detection timestamps are derived from the last evidence event required to complete the finding.
+
+Analyst escalation and detection feedback are explicit persisted case activities. They are not inferred from exported files:
+
+- escalation requires `case.transition`
+- detection feedback requires `detection.review`
+
+Read the normalized timeline directly:
+
+```text
+GET /api/cases/{case_id}/timeline
+```
+
+The existing case-detail response also includes the same timeline under `case_timeline`.
+
+Entries are sorted in UTC-aware chronological order. Malformed legacy timestamps are handled safely instead of crashing the workspace. The legacy `kind` and `title` fields remain available for compatibility while `type/source/actor/detail` are the canonical operational fields.
+
 ## Structured state history
 
 Operational case transitions now expose a dedicated `state_history` payload with:
