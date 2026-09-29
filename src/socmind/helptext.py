@@ -214,6 +214,19 @@ Enterprise web example:
     --host 0.0.0.0
 
 The trusted-proxy mode is designed for deployment behind an authenticating reverse proxy / identity-aware gateway. The proxy must strip client-supplied X-SOCMind-* identity headers and generate fresh signed headers.
+
+Native OIDC:
+  export SOCMIND_OIDC_ISSUER='https://idp.example.com'
+  export SOCMIND_OIDC_CLIENT_ID='socmind-client'
+  export SOCMIND_OIDC_REDIRECT_URI='https://socmind.example.com/auth/callback'
+  export SOCMIND_OIDC_SESSION_SECRET='replace-with-a-long-random-secret'
+  export SOCMIND_OIDC_ROLE_MAP='{"SOC-T1":"analyst","SOC-T2":"senior-analyst","SOC-Leads":"lead","SOC-Admins":"admin"}'
+  socmind web events.jsonl --auth-mode oidc --host 0.0.0.0
+
+Confidential-client secret:
+  SOCMIND_OIDC_CLIENT_SECRET (environment only)
+
+OIDC uses Authorization Code + PKCE S256, discovery/JWKS validation, signed HttpOnly sessions and claim-to-role mapping.
 """,
     "production-ops": """SOCMind Production SOC Operations
 
