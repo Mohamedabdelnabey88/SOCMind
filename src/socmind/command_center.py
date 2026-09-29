@@ -415,6 +415,32 @@ def command_center_snapshot(
         for c in active_filtered
     }
 
+    now_iso = datetime.now(timezone.utc).isoformat()
+    evidence_by_case: dict[str, dict[str, int]] = {}
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT
+              case_id,
+              SUM(CASE WHEN status IN ('pending','in-progress') THEN 1 ELSE 0 END) AS open_count,
+              SUM(CASE
+                    WHEN status IN ('pending','in-progress')
+                     AND due_at IS NOT NULL
+                     AND due_at < ?
+                    THEN 1 ELSE 0 END) AS overdue_count
+            FROM evidence_requests
+            GROUP BY case_id
+            """,
+            (now_iso,),
+        ).fetchall()
+        evidence_by_case = {
+            row["case_id"]: {
+                "open": int(row["open_count"] or 0),
+                "overdue": int(row["overdue_count"] or 0),
+            }
+            for row in rows
+        }
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "summary": {
@@ -424,6 +450,8 @@ def command_center_snapshot(
             "unassigned": sum(1 for c in active_all if not c.owner),
             "sla_breached": len(breached),
             "resolved": len(resolved),
+            "open_evidence_requests": sum(v["open"] for v in evidence_by_case.values()),
+            "overdue_evidence_requests": sum(v["overdue"] for v in evidence_by_case.values()),
             "mtta_minutes": round(sum(mtta_values) / len(mtta_values), 1) if mtta_values else None,
             "mttr_minutes": round(sum(mttr_values) / len(mttr_values), 1) if mttr_values else None,
         },
@@ -445,6 +473,10 @@ def command_center_snapshot(
                 "updated_at": c.updated_at,
                 "acknowledged_at": c.acknowledged_at,
                 "has_evidence": bool(c.evidence_path),
+                "evidence_requests": evidence_by_case.get(
+                    c.case_id,
+                    {"open": 0, "overdue": 0},
+                ),
                 "sla": {
                     "breached": sla_by_case[c.case_id].breached,
                     "remaining_minutes": sla_by_case[c.case_id].remaining_minutes,
