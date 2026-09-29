@@ -116,6 +116,21 @@ socmind alert-orchestrate elastic alerts.ndjson \
 
 The correlation decision is deterministic, configurable, concurrency-safe, and records the exact reasons each alert was attached to a case.
 
+### Milestone 2 — Evidence Requests
+
+Validation gaps can now become tracked evidence work items:
+
+```text
+Validation Gap → Evidence Request → Assignment / Due Time
+→ Fulfilled Evidence → Investigation Re-evaluation
+```
+
+```bash
+socmind evidence-suggest examples/attack_chain.jsonl --json
+```
+
+The case workspace supports pending/in-progress/fulfilled/cancelled requests, records evidence references and responses, surfaces open/overdue evidence backlog, and adds `waiting-for-evidence`, `waiting-for-user`, and `monitoring` case states.
+
 Detailed guide: [Production SOC Operations](docs/production-soc-operations.md)
 
 ## v1.5 Enterprise Foundation
