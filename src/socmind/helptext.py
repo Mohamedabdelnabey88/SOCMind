@@ -87,6 +87,17 @@ Coverage and gaps:
 Tuning feedback:
   socmind tune examples/dispositions.jsonl
   socmind lead-health examples/attack_chain.jsonl --rules detections --dispositions examples/dispositions.jsonl
+
+Governed lifecycle:
+  socmind rule-register rule-registry.json detections/windows/suspicious-powershell.yml \
+    --owner detection-team --actor tier2@example.com --role senior-analyst
+  socmind rule-transition rule-registry.json socmind-win-powershell-hidden \
+    --state testing --actor tier2@example.com --role senior-analyst --note "Begin validation"
+
+Validation evidence is recorded with the current rule version and SHA-256.
+Approval requires syntax PASS, regression PASS, incident replay, FP history and coverage delta.
+Only Lead/Admin authority can approve or promote a rule to production.
+SOCMind never auto-promotes detection rules.
 """,
     "kali": """SOCMind on Kali Linux
 
