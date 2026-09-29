@@ -1,14 +1,20 @@
 import json
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from socmind.cli import main as cli_main
+from socmind.command_center import list_cases
 from socmind.integrations import ElasticClient, WazuhClient, integration_check
 from socmind.ioc import IOC
 from socmind.threat_intel_live import MISPProvider, OpenCTIClient
 
 
 class Handler(BaseHTTPRequestHandler):
+    last_authorization = None
+    last_body = b""
+
     def log_message(self, *args):
         pass
 
@@ -24,6 +30,10 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def do_POST(self):
+        Handler.last_authorization = self.headers.get("Authorization")
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        Handler.last_body = self.rfile.read(length) if length else b""
+
         if self.path.startswith("/security/user/authenticate"):
             data = b"jwt-demo-token"
             self.send_response(200)
@@ -34,7 +44,52 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
             self.close_connection = True
         elif self.path.endswith("/_search"):
-            self._json({"hits": {"hits": [{"_source": {"@timestamp": "2026-09-28T00:00:00Z", "host": {"name": "WS-01"}}}]}})
+            if "wazuh-alerts" in self.path:
+                self._json({
+                    "hits": {
+                        "hits": [{
+                            "_id": "wazuh-live-001",
+                            "_source": {
+                                "timestamp": "2026-09-28T10:00:00Z",
+                                "agent": {"name": "WS-01"},
+                                "rule": {
+                                    "id": "60122",
+                                    "level": 12,
+                                    "description": "Live Wazuh credential attack",
+                                    "mitre": {"id": ["T1110"]},
+                                },
+                                "data": {
+                                    "srcip": "198.51.100.22",
+                                    "dstuser": "analyst",
+                                },
+                            },
+                        }]
+                    }
+                })
+            else:
+                self._json({
+                    "hits": {
+                        "hits": [{
+                            "_id": "elastic-live-001",
+                            "_source": {
+                                "@timestamp": "2026-09-28T10:03:00Z",
+                                "host": {"name": "WS-01"},
+                                "user": {"name": "analyst"},
+                                "process": {"name": "powershell.exe"},
+                                "source": {"ip": "198.51.100.22"},
+                                "destination": {"ip": "203.0.113.77"},
+                                "kibana.alert.rule.rule_id": "elastic-live-rule",
+                                "kibana.alert.rule.name": "Live Elastic PowerShell",
+                                "kibana.alert.severity": "critical",
+                                "kibana.alert.risk_score": 90,
+                                "kibana.alert.rule.threat": [{
+                                    "framework": "MITRE ATT&CK",
+                                    "technique": [{"id": "T1059.001"}],
+                                }],
+                            },
+                        }]
+                    }
+                })
         elif self.path == "/attributes/restSearch":
             self._json({"response": {"Attribute": [{"value": "203.0.113.77", "Tag": [{"name": "tlp:amber"}]}]}})
         elif self.path == "/graphql":
@@ -109,5 +164,80 @@ def test_opencti_graphql_transport():
         )
         data = client.graphql("{ about { version } }")
         assert data["about"]["version"] == "demo"
+    finally:
+        httpd.shutdown()
+
+
+def test_alert_live_elastic_cli_creates_case(tmp_path, monkeypatch, capsys):
+    httpd = server()
+    try:
+        db = tmp_path / "elastic-live.db"
+        evidence = tmp_path / "evidence"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "socmind",
+                "alert-live",
+                "elastic",
+                f"http://127.0.0.1:{httpd.server_port}",
+                ".alerts-security.alerts-default",
+                "--database",
+                str(db),
+                "--evidence-dir",
+                str(evidence),
+                "--json",
+            ],
+        )
+        cli_main()
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["provider"] == "elastic"
+        assert payload["hits"] == 1
+        assert payload["new_cases"] == 1
+        assert payload["results"][0]["priority"] == "P1"
+        assert len(list_cases(db)) == 1
+        body = json.loads(Handler.last_body.decode())
+        assert body["sort"][0].get("@timestamp") is not None
+    finally:
+        httpd.shutdown()
+
+
+def test_alert_live_wazuh_indexer_uses_its_own_credentials(
+    tmp_path, monkeypatch, capsys
+):
+    httpd = server()
+    try:
+        db = tmp_path / "wazuh-live.db"
+        evidence = tmp_path / "evidence"
+        monkeypatch.setenv("ELASTIC_API_KEY", "must-not-be-used")
+        monkeypatch.setenv("WAZUH_INDEXER_USER", "wazuh-user")
+        monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "wazuh-pass")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "socmind",
+                "alert-live",
+                "wazuh-indexer",
+                f"http://127.0.0.1:{httpd.server_port}",
+                "wazuh-alerts*",
+                "--database",
+                str(db),
+                "--evidence-dir",
+                str(evidence),
+                "--json",
+            ],
+        )
+        cli_main()
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["provider"] == "wazuh-indexer"
+        assert payload["hits"] == 1
+        assert payload["new_cases"] == 1
+        assert payload["results"][0]["priority"] == "P1"
+        assert len(list_cases(db)) == 1
+        body = json.loads(Handler.last_body.decode())
+        assert body["sort"][0].get("timestamp") is not None
+        assert Handler.last_authorization is not None
+        assert not Handler.last_authorization.startswith("ApiKey ")
     finally:
         httpd.shutdown()
