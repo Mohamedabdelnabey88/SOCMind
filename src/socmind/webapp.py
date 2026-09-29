@@ -153,6 +153,11 @@ def create_app(
             if app.state.oidc_config is not None
             else "socmind_oidc_session"
         ),
+        oidc_issuer=(
+            app.state.oidc_config.issuer
+            if app.state.oidc_config is not None
+            else None
+        ),
     )
 
     @app.middleware("http")
