@@ -296,11 +296,28 @@ def create_app(
             return assign_case_pg(target, case_id, owner, actor=actor)
         return assign_case(target, case_id, owner, actor=actor)
 
-    def store_transition(case_id: str, target_state: str, actor: str):
+    def store_transition(
+        case_id: str,
+        target_state: str,
+        actor: str,
+        reason: str | None = None,
+    ):
         kind, target = require_store()
         if kind == "postgres":
-            return transition_case_pg(target, case_id, target_state, actor=actor)
-        return transition_case(target, case_id, target_state, actor=actor)
+            return transition_case_pg(
+                target,
+                case_id,
+                target_state,
+                actor=actor,
+                reason=reason,
+            )
+        return transition_case(
+            target,
+            case_id,
+            target_state,
+            actor=actor,
+            reason=reason,
+        )
 
     def store_note(case_id: str, author: str, text: str, disposition):
         kind, target = require_store()
@@ -639,12 +656,21 @@ def create_app(
     ):
         try:
             target = str(request.get("state", "")).strip()
-            store_transition(target_case_id, target, user.subject)
+            reason = str(request.get("reason", "")).strip()
+            store_transition(
+                target_case_id,
+                target,
+                user.subject,
+                reason=reason,
+            )
+            audit_detail = f"Transitioned to {target}"
+            if reason:
+                audit_detail += f" | reason: {reason}"
             enterprise_audit(
                 case_id=target_case_id,
                 user=user,
                 action="case.transition",
-                detail=f"Transitioned to {target}",
+                detail=audit_detail,
             )
             return store_detail(target_case_id)
         except ValueError as exc:
