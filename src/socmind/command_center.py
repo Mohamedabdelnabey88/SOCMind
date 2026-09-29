@@ -117,7 +117,31 @@ CREATE INDEX IF NOT EXISTS idx_alerts_dst_time ON alerts(dst_ip,timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_rule_time ON alerts(rule_id COLLATE NOCASE,timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_technique_time ON alerts(technique COLLATE NOCASE,timestamp);
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
+CREATE TABLE IF NOT EXISTS evidence_requirements (
+    requirement_id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    source TEXT NOT NULL,
+    target TEXT,
+    rationale TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    assigned_to TEXT,
+    due_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    received_at TEXT,
+    response_summary TEXT,
+    evidence_reference TEXT,
+    FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+);
 CREATE INDEX IF NOT EXISTS idx_evidence_collections_case ON evidence_collections(case_id,started_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requirements_case ON evidence_requirements(case_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requirements_status ON evidence_requirements(status,due_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_requirements_open_key
+ON evidence_requirements(case_id,key)
+WHERE status IN ('required','requested');
 """
 
 
@@ -374,12 +398,24 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 item["query"] = json.loads(item.pop("query_json"))
             except (TypeError, json.JSONDecodeError):
                 item["query"] = {}
+        requirements = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT * FROM evidence_requirements
+                WHERE case_id=?
+                ORDER BY created_at ASC
+                """,
+                (case_id,),
+            ).fetchall()
+        ]
     return {
         "case": case,
         "notes": notes,
         "audit": audit,
         "alerts": alerts,
         "evidence_collections": collections,
+        "evidence_requirements": requirements,
     }
 
 
@@ -457,6 +493,25 @@ def command_center_snapshot(
         closed = datetime.fromisoformat(case.updated_at.replace("Z", "+00:00"))
         mttr_values.append(max(0, int((closed - opened).total_seconds() // 60)))
 
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with connect(db_path) as conn:
+        requirement_rows = conn.execute(
+            """
+            SELECT case_id,status,due_at
+            FROM evidence_requirements
+            WHERE status IN ('required','requested')
+            """
+        ).fetchall()
+    requirement_counts: dict[str, dict[str, int]] = {}
+    for row in requirement_rows:
+        bucket = requirement_counts.setdefault(
+            str(row["case_id"]),
+            {"open": 0, "overdue": 0},
+        )
+        bucket["open"] += 1
+        if row["due_at"] and str(row["due_at"]) < now_iso:
+            bucket["overdue"] += 1
+
     active_filtered = [c for c in cases if c.state not in CLOSED_STATES]
     sla_by_case = {
         c.case_id: evaluate_sla(
@@ -499,6 +554,10 @@ def command_center_snapshot(
                 "updated_at": c.updated_at,
                 "acknowledged_at": c.acknowledged_at,
                 "has_evidence": bool(c.evidence_path),
+                "evidence_requirements": requirement_counts.get(
+                    c.case_id,
+                    {"open": 0, "overdue": 0},
+                ),
                 "sla": {
                     "breached": sla_by_case[c.case_id].breached,
                     "remaining_minutes": sla_by_case[c.case_id].remaining_minutes,
