@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .case_workflow import ALLOWED, CaseState
+from .case_workflow import ALLOWED, CaseState, transition_detail
 from .sla import evaluate_sla
 
 
@@ -220,7 +220,7 @@ def assign_case(db_path: str | Path, case_id: str, owner: str, *, actor: str = "
         conn.commit()
 
 
-def transition_case(db_path: str | Path, case_id: str, target: str, *, actor: str = "analyst") -> None:
+def transition_case(db_path: str | Path, case_id: str, target: str, *, actor: str = "analyst", reason: str | None = None) -> None:
     now = datetime.now(timezone.utc).isoformat()
     actor = actor.strip() or "analyst"
     if len(actor) > 120:
@@ -231,13 +231,14 @@ def transition_case(db_path: str | Path, case_id: str, target: str, *, actor: st
         current = row["state"]
         if target not in ALLOWED.get(current, set()):
             raise ValueError(f"Invalid transition: {current} -> {target}")
+        detail = transition_detail(current, target, reason)
         conn.execute(
             "UPDATE cases SET state=?, updated_at=? WHERE case_id=?",
             (target, now, case_id),
         )
         conn.execute(
             "INSERT INTO case_audit(case_id,actor,action,detail,timestamp) VALUES(?,?,?,?,?)",
-            (case_id, actor, "state-transition", f"{current} -> {target}", now),
+            (case_id, actor, "state-transition", detail, now),
         )
         conn.commit()
 
@@ -314,7 +315,7 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 item["correlation_reasons"] = json.loads(item["correlation_reasons"])
             except (TypeError, json.JSONDecodeError):
                 item["correlation_reasons"] = []
-    return {"case": case, "notes": notes, "audit": audit, "alerts": alerts}
+    return {"case": case, "notes": notes, "audit": audit, "alerts": alerts, "allowed_transitions": sorted(ALLOWED.get(case["state"], set()))}
 
 
 def list_cases(

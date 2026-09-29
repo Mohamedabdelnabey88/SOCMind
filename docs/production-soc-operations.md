@@ -201,3 +201,22 @@ This milestone does not yet claim:
 Those are subsequent v1.6 production-operations milestones.
 
 The current milestone establishes the case-orchestration core they can safely build on.
+
+## Advanced lifecycle (in progress)
+
+The existing lifecycle now includes `waiting-for-evidence`, `waiting-for-user`,
+and `monitoring`. Waiting states return to triage/investigation; containment
+can progress to monitoring or return to investigation. Terminal states remain
+terminal. Waiting and monitoring require a nonempty reason. Existing transitions
+remain compatible with older CLI clients; the workspace requests a reason for
+all transitions. State audit entries retain actor, timestamp, old/new state and
+supplied reason in the same transaction as the update. SQLite uses BEGIN
+IMMEDIATE and PostgreSQL uses a row lock. Case detail advertises allowed next
+states; the workspace only offers those states.
+
+Use `socmind command-transition DB CASE --state waiting-for-evidence --reason
+"IdP logs requested" --actor lead` after triage. Timeline entries expose type,
+source and actor; timezone offsets are normalized to UTC for ordering.
+
+This increment does not complete the remaining v1.6 milestones or authorize a
+final release. PostgreSQL regressions run in the PostgreSQL 16 CI job.

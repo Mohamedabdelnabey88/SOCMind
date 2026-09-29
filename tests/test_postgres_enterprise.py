@@ -338,3 +338,26 @@ def test_postgres_alert_flood_keeps_relevant_case_discoverable(tmp_path):
     assert result.created is False
     assert result.case_id == root_result.case_id
     assert result.correlation_score >= 55
+
+
+def test_postgres_advanced_lifecycle_reasons_and_competing_closure():
+    reset_database()
+    upsert_case_pg(DSN, new_case('PG-LIFECYCLE'))
+    transition_case_pg(DSN, 'PG-LIFECYCLE', 'triage', actor='lead', reason='Review')
+    with pytest.raises(ValueError):
+        transition_case_pg(DSN, 'PG-LIFECYCLE', 'waiting-for-evidence')
+    transition_case_pg(DSN, 'PG-LIFECYCLE', 'waiting-for-evidence', actor='lead', reason='Need IdP logs')
+    detail = case_detail_pg(DSN, 'PG-LIFECYCLE')
+    assert detail['case']['state'] == 'waiting-for-evidence'
+    assert 'investigating' in detail['allowed_transitions']
+    assert any('Need IdP logs' in row['detail'] and row['actor'] == 'lead' for row in detail['audit'])
+    transition_case_pg(DSN, 'PG-LIFECYCLE', 'investigating', reason='Logs received')
+    def close(target):
+        try:
+            transition_case_pg(DSN, 'PG-LIFECYCLE', target, reason='Reviewed')
+            return True
+        except ValueError:
+            return False
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sum(pool.map(close, ['resolved', 'false-positive'])) == 1
+    assert len(case_detail_pg(DSN, 'PG-LIFECYCLE')['audit']) == 4

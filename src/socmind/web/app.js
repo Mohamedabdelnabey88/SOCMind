@@ -90,13 +90,14 @@ async function openCase(caseId){
   q("#caseDetailPanel").classList.remove("hidden");q("#detailTitle").textContent=(c.title||c.case_id)+" · "+c.case_id;
   q("#detailMeta").innerHTML='<span class="priority '+esc(c.priority.toLowerCase())+'">'+esc(c.priority)+'</span><span>'+esc(c.state)+'</span><span>Owner: '+esc(c.owner||"Unassigned")+'</span><span>Source: '+esc(c.source||"—")+'</span><span>Acknowledged: '+esc(c.acknowledged_at||"No")+'</span>';
   q("#assignOwner").value=c.owner||"";
+  q("#transitionState").innerHTML='<option value="">Transition…</option>'+(data.allowed_transitions||[]).map(s=>'<option value="'+esc(s)+'">'+esc(s)+'</option>').join("");
   q("#caseNotes").innerHTML=data.notes.map(n=>'<div><b>'+esc(n.author)+'</b><span>'+esc(n.created_at)+'</span><p>'+esc(n.text)+'</p></div>').join("")||"<div>No notes yet.</div>";
   q("#caseAudit").innerHTML=data.audit.map(a=>'<div><b>'+esc(a.action)+'</b><span>'+esc(a.actor)+' · '+esc(a.timestamp)+'</span><p>'+esc(a.detail)+'</p></div>').join("")||"<div>No audit entries yet.</div>";
   q("#caseAlerts").innerHTML=(data.alerts||[]).map(a=>{
     const reasons=(a.correlation_reasons||[]).map(r=>'<li>'+esc(r.detail)+' <span>+'+esc(r.weight)+'</span></li>').join("");
     const rule=a.rule_id?(' · rule '+esc(a.rule_id)):"";
     const technique=a.technique?(' · '+esc(a.technique)):"";
-    return '<div><b>'+esc(a.alert_id)+' · '+esc(a.source)+'</b><span>'+esc(a.timestamp)+' · severity '+esc(a.severity)+' · correlation '+esc(a.correlation_score)+rule+technique+'</span><p>'+esc(a.title)+'</p>'+(reasons?'<ul>'+reasons+'</ul>':'<p class="score">Root alert / no correlation reason required.</p>')+'</div>';
+    return '<div><b>'+esc(a.alert_id)+' · '+esc(a.source)+'</b><span>'+esc(a.timestamp)+' · severity '+esc(a.severity)+' · correlation '+esc(a.correlation_score)+rule+technique+'</span><p>'+esc(a.title)+'</p><p>'+esc(a.priority)+' · Host: '+esc(a.host||'—')+' · User: '+esc(a.user||'—')+' · Process: '+esc(a.process||'—')+'</p>'+(reasons?'<ul>'+reasons+'</ul>':'<p class="score">Root alert / no correlation reason required.</p>')+'</div>';
   }).join("")||"<div>No orchestrated alerts linked to this case.</div>";
   q("#caseTimeline").innerHTML=(data.case_timeline||[]).map(item=>
     '<div class="event"><time>'+esc(item.timestamp||"—")+'</time><strong>'+esc(item.kind)+' · '+esc(item.title)+'</strong><p>'+esc(item.detail||"")+'</p></div>'
@@ -117,7 +118,7 @@ async function mutateCase(path,body=null){
 }
 q("#ackCase").addEventListener("click",()=>mutateCase("/acknowledge"));
 q("#assignCase").addEventListener("click",()=>{const owner=q("#assignOwner").value.trim();if(owner)mutateCase("/assign",{owner});});
-q("#transitionCase").addEventListener("click",()=>{const state=q("#transitionState").value;if(state)mutateCase("/transition",{state});});
+q("#transitionCase").addEventListener("click",()=>{const state=q("#transitionState").value;if(state){const reason=prompt("Reason for state change");if(reason&&reason.trim())mutateCase("/transition",{state,reason:reason.trim()});}});
 q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim();if(!text)return;mutateCase("/notes",{text}).then(()=>q("#noteText").value="");});
 
 async function loadLeadHealth(){

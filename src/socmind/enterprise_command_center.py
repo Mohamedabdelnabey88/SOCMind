@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .case_workflow import ALLOWED, CaseState
+from .case_workflow import ALLOWED, CaseState, transition_detail
 from .postgres_store import _psycopg, initialize_postgres
 from .sla import evaluate_sla
 
@@ -171,6 +171,7 @@ def transition_case_pg(
     target: str,
     *,
     actor: str = "analyst",
+    reason: str | None = None,
 ) -> None:
     actor = actor.strip() or "analyst"
     if len(actor) > 120:
@@ -182,6 +183,7 @@ def transition_case_pg(
             current = row["state"]
             if target not in ALLOWED.get(current, set()):
                 raise ValueError(f"Invalid transition: {current} -> {target}")
+            detail = transition_detail(current, target, reason)
             cur.execute(
                 "UPDATE cases SET state=%s, updated_at=%s WHERE case_id=%s",
                 (target, now, case_id),
@@ -191,7 +193,7 @@ def transition_case_pg(
                 INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
                 VALUES(%s,%s,%s,%s,%s)
                 """,
-                (case_id, actor, "state-transition", f"{current} -> {target}", now),
+                (case_id, actor, "state-transition", detail, now),
             )
         conn.commit()
 
@@ -284,6 +286,7 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
         "notes": notes,
         "audit": audit,
         "alerts": alerts,
+        "allowed_transitions": sorted(ALLOWED.get(case_payload["state"], set())),
     }
 
 

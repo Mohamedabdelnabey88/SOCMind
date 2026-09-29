@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .audit_chain import append_record, verify_chain
@@ -40,7 +40,7 @@ def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
     if opened_at:
         items.append({
             "timestamp": opened_at,
-            "kind": "case",
+            "kind": "case", "type": "case-created", "actor": "system", "source": case.get("source") or "socmind",
             "title": "Case opened",
             "detail": f"{case.get('priority', 'P3')} · {case.get('source') or 'unknown source'}",
         })
@@ -48,7 +48,7 @@ def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
     for alert in detail.get("alerts") or []:
         items.append({
             "timestamp": alert.get("timestamp"),
-            "kind": "alert",
+            "kind": "alert", "type": "detection-event", "actor": "sensor", "source": alert.get("source") or "unknown",
             "title": alert.get("title") or alert.get("alert_id") or "Alert",
             "detail": (
                 f"{alert.get('source') or 'unknown'} · severity {alert.get('severity', '—')} · "
@@ -59,7 +59,7 @@ def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
     for note in detail.get("notes") or []:
         items.append({
             "timestamp": note.get("created_at"),
-            "kind": "analyst-note",
+            "kind": "analyst-note", "type": "note", "actor": note.get("author") or "unknown", "source": "socmind",
             "title": f"Analyst note · {note.get('author') or 'unknown'}",
             "detail": note.get("text") or "",
         })
@@ -67,7 +67,7 @@ def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
     for audit in detail.get("audit") or []:
         items.append({
             "timestamp": audit.get("timestamp"),
-            "kind": "case-action",
+            "kind": "case-action", "type": audit.get("action") or "case-action", "actor": audit.get("actor") or "unknown", "source": "socmind",
             "title": audit.get("action") or "Case action",
             "detail": f"{audit.get('actor') or 'unknown'} · {audit.get('detail') or ''}",
         })
@@ -76,7 +76,7 @@ def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
         for event in investigation.get("timeline") or []:
             items.append({
                 "timestamp": event.get("timestamp"),
-                "kind": "evidence",
+                "kind": "evidence", "type": "evidence-event", "actor": "collector", "source": event.get("source") or "unknown",
                 "title": (
                     f"{event.get('host') or 'unknown'} · "
                     f"{event.get('source') or 'unknown'} · "
@@ -99,7 +99,7 @@ def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
         try:
             parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
             if parsed.tzinfo is not None:
-                return parsed.replace(tzinfo=None)
+                return parsed.astimezone(timezone.utc).replace(tzinfo=None)
             return parsed
         except ValueError:
             return datetime.min
@@ -238,11 +238,11 @@ def create_app(
             return assign_case_pg(target, case_id, owner, actor=actor)
         return assign_case(target, case_id, owner, actor=actor)
 
-    def store_transition(case_id: str, target_state: str, actor: str):
+    def store_transition(case_id: str, target_state: str, actor: str, reason=None):
         kind, target = require_store()
         if kind == "postgres":
-            return transition_case_pg(target, case_id, target_state, actor=actor)
-        return transition_case(target, case_id, target_state, actor=actor)
+            return transition_case_pg(target, case_id, target_state, actor=actor, reason=reason)
+        return transition_case(target, case_id, target_state, actor=actor, reason=reason)
 
     def store_note(case_id: str, author: str, text: str, disposition):
         kind, target = require_store()
@@ -405,7 +405,7 @@ def create_app(
     ):
         try:
             target = str(request.get("state", "")).strip()
-            store_transition(target_case_id, target, user.subject)
+            store_transition(target_case_id, target, user.subject, request.get("reason"))
             enterprise_audit(
                 case_id=target_case_id,
                 user=user,

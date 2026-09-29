@@ -217,6 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
     case_assign.add_argument("--owner", required=True)
 
     case_move = sub.add_parser("case-transition", help="Move a case through the SOC lifecycle")
+    case_move.add_argument("--reason")
     case_move.add_argument("case_file")
     case_move.add_argument("--state", required=True)
 
@@ -271,6 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
     command_transition.add_argument("case_id")
     command_transition.add_argument("--state", required=True)
     command_transition.add_argument("--actor", default="cli-analyst")
+    command_transition.add_argument("--reason")
 
     command_note = sub.add_parser("command-note", help="Add a note to a registered case")
     command_note.add_argument("database")
@@ -633,7 +635,7 @@ def main() -> None:
 
     if args.command == "case-transition":
         case = load_case(args.case_file)
-        transition(case, args.state)
+        transition(case, args.state, reason=args.reason)
         save_case(case, args.case_file)
         print(f"Case state -> {case.case_id} | {case.state}")
         return
@@ -701,7 +703,7 @@ def main() -> None:
         return
 
     if args.command == "command-transition":
-        transition_case(args.database, args.case_id, args.state, actor=args.actor)
+        transition_case(args.database, args.case_id, args.state, actor=args.actor, reason=args.reason)
         print(f"Case state -> {args.case_id} | {args.state}")
         return
 
