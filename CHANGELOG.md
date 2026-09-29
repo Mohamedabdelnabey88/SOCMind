@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Production SOC Operations — Milestone 1
+## 1.6.0 — Production SOC Operations — Milestone 1
 
 - Wazuh/Elastic alert promotion into operational SOC cases
 - deterministic source-alert IDs and idempotent duplicate handling
