@@ -220,3 +220,38 @@ source and actor; timezone offsets are normalized to UTC for ordering.
 
 This increment does not complete the remaining v1.6 milestones or authorize a
 final release. PostgreSQL regressions run in the PostgreSQL 16 CI job.
+
+## Evidence requirements API
+
+`GET/POST /api/cases/{case_id}/requirements` lists or creates requirements.
+Creation accepts `label` and `origin`; repeated identical requirements are
+idempotent. `POST /api/cases/{case_id}/requirements/{requirement_id}` takes
+`state`, `reason`, optional `expected_state`, and `evidence_reference` when
+receiving evidence. States are required, requested, received, unavailable and
+waived. A waiver requires case.transition permission; ordinary requests require
+case.note. Missing/unavailable evidence is not fed into contradiction scoring.
+The Python `requirements_from_quality` adapter creates requirements from
+applicable, incomplete quality items. References are analyst assertions, not
+automatically verified artifact records. All changes are transactionally audited.
+
+## Immutable evidence artifacts (initial implementation)
+
+`socmind evidence-register CASE path --database socmind.db --evidence-dir objects
+--source IdP` copies a regular file into a content-addressed local store and
+records SHA-256, byte count, original name, collection time, collector, source,
+case and storage identifier. Repeated registration is idempotent. Original files
+are not overwritten. `socmind evidence-verify CASE --database socmind.db
+--evidence-dir objects` reports verified, mismatch, missing or unavailable and
+returns exit code 1 on failed verification. Both accept `--postgres-dsn`.
+
+Artifacts are limited to 64 MiB per file. Local roots must be service-owned;
+symlinks are rejected. These hashes detect content changes, not a malicious
+administrator rewriting both metadata and data. The mutable orchestration
+working file remains separate; explicit registration creates an immutable
+snapshot. A failed metadata transaction can leave an unreferenced object;
+objects are never automatically deleted.
+
+The SDK-independent EvidenceStore protocol includes local and injected-client
+S3 adapters. The S3 adapter requires conditional PutObject (`IfNoneMatch=*`),
+which prevents overwriting existing keys. Its unit tests use a simulated client;
+real S3/MinIO integration and deployment configuration remain release gates.

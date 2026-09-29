@@ -132,6 +132,33 @@ CREATE TABLE IF NOT EXISTS case_alerts (
   PRIMARY KEY(case_id, alert_id)
 );
 
+CREATE TABLE IF NOT EXISTS evidence_requirements (
+    requirement_id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(case_id),
+    label TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    state TEXT NOT NULL,
+    evidence_reference TEXT,
+    updated_at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    reason TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_requirements_case ON evidence_requirements(case_id, state);
+
+CREATE TABLE IF NOT EXISTS evidence_artifacts (
+    artifact_id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(case_id),
+    sha256 TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    original_name TEXT NOT NULL,
+    collected_at TEXT NOT NULL,
+    collector TEXT NOT NULL,
+    source TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    storage_id TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_case ON evidence_artifacts(case_id);
+
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority, state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
 CREATE INDEX IF NOT EXISTS idx_notes_case ON case_notes(case_id, created_at);

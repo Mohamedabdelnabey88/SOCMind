@@ -361,3 +361,34 @@ def test_postgres_advanced_lifecycle_reasons_and_competing_closure():
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert sum(pool.map(close, ['resolved', 'false-positive'])) == 1
     assert len(case_detail_pg(DSN, 'PG-LIFECYCLE')['audit']) == 4
+
+
+def test_postgres_evidence_requirements_are_idempotent_and_audited():
+    from socmind.evidence_requests import create_requirement, update_requirement, list_requirements
+    from socmind.rbac import Principal
+    reset_database()
+    upsert_case_pg(DSN, new_case('PG-REQ'))
+    actor = Principal('lead', 'lead', 'test')
+    item = create_requirement(DSN, 'PG-REQ', 'MFA result', origin='validation-gap', principal=actor, postgres=True)
+    repeat = create_requirement(DSN, 'PG-REQ', 'MFA result', origin='validation-gap', principal=actor, postgres=True)
+    assert item == repeat
+    update_requirement(DSN, 'PG-REQ', item['requirement_id'], 'received', reason='IdP export',
+                       evidence_reference='idp-export-001', principal=actor, postgres=True)
+    assert list_requirements(DSN, 'PG-REQ', postgres=True)[0]['state'] == 'received'
+    assert len(case_detail_pg(DSN, 'PG-REQ')['audit']) == 2
+
+
+def test_postgres_evidence_artifact_integrity(tmp_path):
+    from socmind.evidence_integrity import register_artifact, verify_artifacts
+    from socmind.evidence_storage import LocalEvidenceStore
+    from socmind.rbac import Principal
+    reset_database()
+    upsert_case_pg(DSN, new_case('PG-ART'))
+    actor = Principal('analyst', 'analyst', 'test')
+    source = tmp_path / 'evidence.jsonl'
+    source.write_bytes(b'original')
+    store = LocalEvidenceStore(tmp_path / 'objects')
+    item = register_artifact(DSN, 'PG-ART', source, store, storage_id='local', source='test', principal=actor, postgres=True)
+    assert verify_artifacts(DSN, 'PG-ART', {'local': store}, principal=actor, postgres=True)[0]['integrity_status'] == 'verified'
+    (store.root / item['storage_key']).write_bytes(b'tampered')
+    assert verify_artifacts(DSN, 'PG-ART', {'local': store}, principal=actor, postgres=True)[0]['integrity_status'] == 'mismatch'

@@ -338,6 +338,17 @@ def build_parser() -> argparse.ArgumentParser:
     security_cmd.add_argument("--command-db")
     security_cmd.add_argument("--json", action="store_true")
 
+    for verb in ("evidence-register", "evidence-verify"):
+        artifact_cmd = sub.add_parser(verb, help="Register or verify immutable evidence artifacts")
+        artifact_cmd.add_argument("case_id")
+        artifact_cmd.add_argument("--database", default="socmind.db")
+        artifact_cmd.add_argument("--postgres-dsn")
+        artifact_cmd.add_argument("--evidence-dir", required=True)
+        artifact_cmd.add_argument("--actor", default="cli-analyst")
+        if verb == "evidence-register":
+            artifact_cmd.add_argument("path")
+            artifact_cmd.add_argument("--source", required=True)
+
     benchmark_cmd = sub.add_parser("benchmark", help="Run a repeatable local investigation benchmark")
     benchmark_cmd.add_argument("--events", type=int, default=5000)
     benchmark_cmd.add_argument("--json", action="store_true")
@@ -892,6 +903,24 @@ def main() -> None:
             for item in checks:
                 print(f"[{'OK' if item.ok else 'WARN'}] {item.name}: {item.detail}")
         raise SystemExit(0 if all(item.ok for item in checks) else 1)
+
+    if args.command in {"evidence-register", "evidence-verify"}:
+        from .evidence_integrity import register_artifact, verify_artifacts
+        from .evidence_storage import LocalEvidenceStore
+        from .rbac import Principal
+        store = LocalEvidenceStore(args.evidence_dir)
+        target = args.postgres_dsn or args.database
+        actor = Principal(args.actor, "admin", "local-cli")
+        if args.command == "evidence-register":
+            result = register_artifact(target, args.case_id, args.path, store, storage_id="local",
+                                       source=args.source, principal=actor, postgres=bool(args.postgres_dsn))
+        else:
+            result = verify_artifacts(target, args.case_id, {"local": store}, principal=actor,
+                                      postgres=bool(args.postgres_dsn))
+        print(json.dumps(result, indent=2))
+        if args.command == "evidence-verify" and any(x["integrity_status"] != "verified" for x in result):
+            raise SystemExit(1)
+        return
 
     if args.command == "benchmark":
         result = run_benchmark(args.events)

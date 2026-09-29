@@ -416,6 +416,42 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/cases/{target_case_id}/requirements")
+    def requirements_endpoint(target_case_id: str, user: Principal = Depends(allowed("case.read"))):
+        from .evidence_requests import list_requirements
+        kind, target = require_store()
+        try:
+            return list_requirements(target, target_case_id, postgres=kind == "postgres")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/cases/{target_case_id}/requirements")
+    def requirement_create_endpoint(target_case_id: str, request: dict = Body(...),
+                                    user: Principal = Depends(allowed("case.note"))):
+        from .evidence_requests import create_requirement
+        kind, target = require_store()
+        try:
+            return create_requirement(target, target_case_id, request.get("label"),
+                                      origin=request.get("origin", "analyst"), principal=user,
+                                      postgres=kind == "postgres")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/cases/{target_case_id}/requirements/{requirement_id}")
+    def requirement_update_endpoint(target_case_id: str, requirement_id: str, request: dict = Body(...),
+                                    user: Principal = Depends(allowed("case.note"))):
+        from .evidence_requests import update_requirement
+        kind, target = require_store()
+        try:
+            return update_requirement(target, target_case_id, requirement_id, request.get("state"),
+                                      reason=request.get("reason"), principal=user,
+                                      evidence_reference=request.get("evidence_reference"),
+                                      expected_state=request.get("expected_state"), postgres=kind == "postgres")
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/cases/{target_case_id}/notes")
     def note_endpoint(
         target_case_id: str,
