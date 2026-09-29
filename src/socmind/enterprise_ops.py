@@ -104,8 +104,39 @@ CREATE TABLE IF NOT EXISTS case_audit (
   timestamp TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS alerts (
+  alert_id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  timestamp TIMESTAMPTZ NOT NULL,
+  title TEXT NOT NULL,
+  severity INTEGER NOT NULL,
+  priority TEXT NOT NULL,
+  host TEXT NOT NULL,
+  "user" TEXT,
+  process TEXT,
+  src_ip TEXT,
+  dst_ip TEXT,
+  technique TEXT,
+  rule_id TEXT,
+  fingerprint TEXT NOT NULL,
+  raw_reference TEXT,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS case_alerts (
+  case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+  alert_id TEXT NOT NULL REFERENCES alerts(alert_id) ON DELETE CASCADE,
+  correlation_score INTEGER NOT NULL,
+  correlation_reasons JSONB NOT NULL,
+  linked_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY(case_id, alert_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority, state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
 CREATE INDEX IF NOT EXISTS idx_notes_case ON case_notes(case_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_case ON case_audit(case_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_host_user ON alerts(host, "user");
+CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
 """
