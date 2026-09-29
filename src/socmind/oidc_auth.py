@@ -81,10 +81,13 @@ def _json_request(
     *,
     method: str = "GET",
     data: dict[str, str] | None = None,
+    extra_headers: dict[str, str] | None = None,
     timeout: float = 10.0,
 ) -> dict:
     body = None
     headers = {"Accept": "application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
     if data is not None:
         body = urlencode(data).encode("utf-8")
         headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -293,9 +296,33 @@ def exchange_code(
         "client_id": config.client_id,
         "code_verifier": verifier,
     }
+    headers: dict[str, str] = {}
     if config.client_secret:
-        data["client_secret"] = config.client_secret
-    payload = _json_request(endpoint, method="POST", data=data)
+        methods = discovery.get("token_endpoint_auth_methods_supported")
+        supported = (
+            [str(item) for item in methods]
+            if isinstance(methods, list)
+            else ["client_secret_basic"]
+        )
+        if "client_secret_basic" in supported:
+            credentials = (
+                f"{config.client_id}:{config.client_secret}".encode("utf-8")
+            )
+            headers["Authorization"] = (
+                "Basic " + base64.b64encode(credentials).decode("ascii")
+            )
+        elif "client_secret_post" in supported:
+            data["client_secret"] = config.client_secret
+        else:
+            raise ValueError(
+                "OIDC provider does not advertise a supported client-secret authentication method"
+            )
+    payload = _json_request(
+        endpoint,
+        method="POST",
+        data=data,
+        extra_headers=headers,
+    )
     if not payload.get("id_token"):
         raise PermissionError("OIDC token response did not include an ID token")
     return payload
