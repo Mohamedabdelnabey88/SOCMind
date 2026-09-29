@@ -1002,31 +1002,32 @@ def main() -> None:
             )
             query = raw_query.get("query", raw_query)
 
+        if args.provider == "wazuh-indexer":
+            api_key = None
+            bearer_token = os.environ.get("WAZUH_INDEXER_JWT")
+            username = os.environ.get("WAZUH_INDEXER_USERNAME")
+            password = os.environ.get("WAZUH_INDEXER_PASSWORD")
+            sort_field = "timestamp"
+        else:
+            api_key = os.environ.get("ELASTIC_API_KEY")
+            bearer_token = os.environ.get("ELASTIC_BEARER_TOKEN")
+            username = os.environ.get("ELASTIC_USERNAME")
+            password = os.environ.get("ELASTIC_PASSWORD")
+            sort_field = "@timestamp"
+
         client = ElasticClient(
             args.url,
-            api_key=os.environ.get("ELASTIC_API_KEY"),
-            bearer_token=(
-                os.environ.get("WAZUH_INDEXER_JWT")
-                if args.provider == "wazuh-indexer"
-                else os.environ.get("ELASTIC_BEARER_TOKEN")
-            ),
-            username=(
-                os.environ.get("WAZUH_INDEXER_USERNAME")
-                if args.provider == "wazuh-indexer"
-                else os.environ.get("ELASTIC_USERNAME")
-            ),
-            password=(
-                os.environ.get("WAZUH_INDEXER_PASSWORD")
-                if args.provider == "wazuh-indexer"
-                else os.environ.get("ELASTIC_PASSWORD")
-            ),
+            api_key=api_key,
+            bearer_token=bearer_token,
+            username=username,
+            password=password,
             verify_tls=not args.insecure,
         )
         response = client.search(
             args.index,
             query=query,
             size=args.size,
-            sort=[{"@timestamp": {"order": "asc"}}],
+            sort=[{sort_field: {"order": "asc"}}],
         )
         hits = response.get("hits", {}).get("hits", [])
         alert_events = (
