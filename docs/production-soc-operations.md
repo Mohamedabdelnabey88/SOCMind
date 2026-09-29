@@ -201,6 +201,67 @@ Those are subsequent v1.6 production-operations milestones.
 
 The current milestone establishes the case-orchestration core they can safely build on.
 
+## Detection Rule Lifecycle
+
+SOCMind supports a governed detection lifecycle:
+
+```text
+experimental
+  ↓
+testing
+  ↓
+approved
+  ↓
+production
+  ↓
+deprecated
+  ↓
+retired
+```
+
+A rule lifecycle record stores:
+
+- rule ID and source path
+- semantic version
+- owner
+- created/updated timestamps
+- status
+- change notes
+- ATT&CK mapping
+- syntax validation status
+- regression fixture status
+- confirmed-incident replay results
+- false-positive history
+- coverage delta history
+- auditable lifecycle history
+
+The registry uses cross-platform file locking and atomic replacement. Registry targets and rule sources that are symlinks are rejected for mutation-sensitive operations.
+
+Approval is gated. A rule cannot enter `approved` or `production` until SOCMind has recorded:
+
+1. syntax validation PASS
+2. regression fixture PASS
+3. at least one confirmed-incident replay
+4. at least one false-positive observation
+5. at least one coverage delta measurement
+
+Senior analysts may manage validation evidence. Lead/Admin authority is required for approval, deprecation and retirement, and Lead/Admin promotion authority is required for `production`.
+
+SOCMind never auto-promotes a detection rule.
+
+Example:
+
+```bash
+socmind rule-register rule-registry.json detections/windows/suspicious-powershell.yml \
+  --owner detection-team --actor tier2@example.com --role senior-analyst
+
+socmind rule-transition rule-registry.json socmind-win-powershell-hidden \
+  --state testing --actor tier2@example.com --role senior-analyst \
+  --note "Begin validation"
+```
+
+The local CLI role is an explicit operator policy assertion, not an identity provider. Native OIDC/SSO is a separate v1.6 milestone.
+
 
 ## Milestone 2 — Live Evidence Collector
 
