@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Production SOC Operations — Milestone 1
+
+- Wazuh/Elastic alert promotion into operational SOC cases
+- deterministic source-alert IDs and idempotent duplicate handling
+- explainable alert correlation with configurable threshold/window
+- automatic case creation or active-case attachment
+- case priority escalation from higher-severity correlated alerts
+- contextual evidence-window collection and event deduplication
+- concurrent-safe orchestration for SQLite and PostgreSQL
+- per-case evidence file locking
+- PostgreSQL alert/case-correlation schema
+- Alert Chain in web case detail with exact correlation reasons
+- CLI workflow: `socmind alert-orchestrate`
+- CI coverage across Windows, Ubuntu, Kali, packaged wheel and PostgreSQL 16
+
+
 ## Unreleased — Feature Maturity Upgrade
 
 - per-technique detection timing and visibility in Investigation Replay

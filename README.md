@@ -76,6 +76,48 @@ socmind analyze examples/linux_attack_chain.jsonl \
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
 
+## v1.6 Production SOC Operations — Milestone 1
+
+SOCMind can now promote Wazuh/Elastic alerts into an operational case queue instead of requiring every investigation to start from a manually prepared evidence file.
+
+```text
+Alert
+  ↓
+Duplicate Check
+  ↓
+Explainable Correlation
+  ↓
+New or Existing Case
+  ↓
+Evidence Window
+  ↓
+Priority Escalation
+  ↓
+Auditable Alert Chain
+```
+
+Example:
+
+```bash
+socmind alert-orchestrate wazuh alerts.jsonl \
+  --database socmind.db \
+  --evidence normalized.jsonl \
+  --evidence-dir socmind-evidence
+```
+
+PostgreSQL:
+
+```bash
+socmind alert-orchestrate elastic alerts.ndjson \
+  --postgres-dsn "$SOCMIND_POSTGRES_DSN" \
+  --evidence normalized.jsonl \
+  --evidence-dir /var/lib/socmind/evidence
+```
+
+The correlation decision is deterministic, configurable, concurrency-safe, and records the exact reasons each alert was attached to a case.
+
+Detailed guide: [Production SOC Operations](docs/production-soc-operations.md)
+
 ## v1.5 Enterprise Foundation
 
 SOCMind now supports a team-oriented enterprise foundation while preserving SQLite for local/demo use.
@@ -743,6 +785,7 @@ socmind analyze normalized.jsonl \
 - [Investigation Replay Engine](docs/investigation-replay-engine.md)
 - [Evidence Contradiction & Case Similarity](docs/evidence-contradiction-case-similarity.md)
 - [Enterprise Foundation](docs/enterprise-foundation.md)
+- [Production SOC Operations](docs/production-soc-operations.md)
 
 ## CI quality gate
 

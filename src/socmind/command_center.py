@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -52,10 +53,41 @@ CREATE TABLE IF NOT EXISTS case_audit (
     detail TEXT NOT NULL,
     timestamp TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS alerts (
+    alert_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    title TEXT NOT NULL,
+    severity INTEGER NOT NULL,
+    priority TEXT NOT NULL,
+    host TEXT NOT NULL,
+    user TEXT,
+    process TEXT,
+    src_ip TEXT,
+    dst_ip TEXT,
+    technique TEXT,
+    rule_id TEXT,
+    fingerprint TEXT NOT NULL,
+    raw_reference TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS case_alerts (
+    case_id TEXT NOT NULL,
+    alert_id TEXT NOT NULL,
+    correlation_score INTEGER NOT NULL,
+    correlation_reasons TEXT NOT NULL,
+    linked_at TEXT NOT NULL,
+    PRIMARY KEY(case_id, alert_id),
+    FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE,
+    FOREIGN KEY(alert_id) REFERENCES alerts(alert_id) ON DELETE CASCADE
+);
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority,state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
 CREATE INDEX IF NOT EXISTS idx_notes_case ON case_notes(case_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_case ON case_audit(case_id,timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_host_user ON alerts(host,user);
+CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
 """
 
 
@@ -229,7 +261,29 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 (case_id,),
             ).fetchall()
         ]
-    return {"case": case, "notes": notes, "audit": audit}
+        alerts = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                  a.*,
+                  ca.correlation_score,
+                  ca.correlation_reasons,
+                  ca.linked_at
+                FROM case_alerts ca
+                JOIN alerts a ON a.alert_id=ca.alert_id
+                WHERE ca.case_id=?
+                ORDER BY a.timestamp ASC
+                """,
+                (case_id,),
+            ).fetchall()
+        ]
+        for item in alerts:
+            try:
+                item["correlation_reasons"] = json.loads(item["correlation_reasons"])
+            except (TypeError, json.JSONDecodeError):
+                item["correlation_reasons"] = []
+    return {"case": case, "notes": notes, "audit": audit, "alerts": alerts}
 
 
 def list_cases(

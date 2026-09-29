@@ -117,6 +117,8 @@ def test_postgres_schema_contains_enterprise_tables_and_indexes():
     assert "CREATE TABLE IF NOT EXISTS cases" in schema
     assert "REFERENCES cases(case_id)" in schema
     assert "idx_cases_priority_state" in schema
+    assert "CREATE TABLE IF NOT EXISTS alerts" in schema
+    assert "CREATE TABLE IF NOT EXISTS case_alerts" in schema
 
 
 def test_web_rbac_and_enterprise_audit(tmp_path):

@@ -77,11 +77,17 @@
           </div>
           <div class="grid two detail-grid">
             <div><h3>Analyst Notes</h3><div id="caseNotes" class="stack compact"></div>
-              <div class="note-form"><input id="noteAuthor" value="web-analyst" placeholder="Author"><textarea id="noteText" placeholder="Investigation note"></textarea><button id="addNote">Add Note</button></div>
+              <div class="note-form"><textarea id="noteText" placeholder="Investigation note"></textarea><button id="addNote">Add Note</button></div>
             </div>
             <div><h3>Audit Trail</h3><div id="caseAudit" class="stack compact"></div></div>
           </div>
-          <div id="linkedInvestigation" class="linked-investigation"></div>
+          <div class="grid two detail-grid" style="margin-top:16px">
+            <div>
+              <h3>Alert Chain</h3>
+              <div id="caseAlerts" class="stack compact"></div>
+            </div>
+            <div id="linkedInvestigation" class="linked-investigation"></div>
+          </div>
         </article>
       </section>
 

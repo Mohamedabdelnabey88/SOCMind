@@ -200,6 +200,34 @@ Enterprise web example:
 
 The trusted-proxy mode is designed for deployment behind an authenticating reverse proxy / identity-aware gateway. The proxy must strip client-supplied X-SOCMind-* identity headers and generate fresh signed headers.
 """,
+    "production-ops": """SOCMind Production SOC Operations
+
+Promote Wazuh alerts into the SOC case queue:
+  socmind alert-orchestrate wazuh alerts.jsonl \
+    --database socmind.db \
+    --evidence normalized.jsonl \
+    --evidence-dir evidence
+
+Use PostgreSQL instead:
+  export SOCMIND_POSTGRES_DSN='postgresql://user:pass@db:5432/socmind'
+  socmind alert-orchestrate elastic alerts.ndjson \
+    --postgres-dsn "$SOCMIND_POSTGRES_DSN" \
+    --evidence normalized.jsonl \
+    --evidence-dir evidence
+
+Tuning:
+  --correlation-window 15
+  --correlation-threshold 55
+  --evidence-before 15
+  --evidence-after 15
+
+Outcomes:
+- NEW CASE: no active case met the correlation threshold
+- CORRELATED: alert was linked to an existing active case with explainable reasons
+- DUPLICATE: the same source alert ID was already ingested
+
+Correlation is deterministic and auditable. It does not claim attacker attribution.
+""",
     "demo": """SOCMind Portfolio Demo
 
   socmind demo-init -o socmind-demo
@@ -232,6 +260,7 @@ Topics:
   ire
   reasoning
   enterprise
+  production-ops
   demo
 
 Common first commands:
