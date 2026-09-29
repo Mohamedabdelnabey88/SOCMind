@@ -99,7 +99,9 @@ def test_state_history_records_actor_timestamp_and_reason(tmp_path):
     assert len(history) == 1
     assert history[0]["actor"] == "alice"
     assert history[0]["timestamp"]
-    assert "Initial validation started" in history[0]["detail"]
+    assert history[0]["from_state"] == "new"
+    assert history[0]["to_state"] == "triage"
+    assert history[0]["reason"] == "Initial validation started"
 
 
 def test_connect_migrates_existing_sqlite_cases_table(tmp_path):
