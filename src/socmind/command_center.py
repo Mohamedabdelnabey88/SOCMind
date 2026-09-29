@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -91,14 +92,30 @@ CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
 """
 
 
+def _retry_locked(operation, *, attempts: int = 20):
+    for attempt in range(attempts):
+        try:
+            return operation()
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == attempts - 1:
+                raise
+            time.sleep(min(0.05 * (attempt + 1), 0.5))
+
+
 def connect(path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path), timeout=10.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=10000")
-    conn.executescript(SCHEMA)
+    conn.execute("PRAGMA foreign_keys=ON")
+
+    def configure_journal():
+        mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+        if mode != "wal":
+            conn.execute("PRAGMA journal_mode=WAL")
+
+    _retry_locked(configure_journal)
+    conn.execute("PRAGMA synchronous=NORMAL")
+    _retry_locked(lambda: conn.executescript(SCHEMA))
     columns = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
     for name, sql_type in {
         "acknowledged_at": "TEXT",
