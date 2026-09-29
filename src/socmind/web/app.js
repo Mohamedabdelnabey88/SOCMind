@@ -100,7 +100,9 @@ async function openCase(caseId){
   }).join("")||"<div>No orchestrated alerts linked to this case.</div>";
   q("#caseEvidenceCollections").innerHTML=(data.evidence_collections||[]).map(item=>{
     const status=item.status==="completed"?"✓ completed":"⚠ "+esc(item.status||"unknown");
-    return '<div><b>'+status+' · '+esc(item.provider||"unknown")+'</b><span>'+esc(item.source_ref||"—")+' · '+esc(item.event_count||0)+' event(s) · '+esc(item.started_at||"—")+'</span><p>'+esc(item.window_start||"—")+' → '+esc(item.window_end||"—")+(item.error?' · '+esc(item.error):'')+'</p></div>';
+    const total=item.total_hits==null?"unknown":item.total_hits;
+    const truncated=item.truncated?'<strong class="sla-breach">TRUNCATED</strong> ':"";
+    return '<div><b>'+truncated+status+' · '+esc(item.provider||"unknown")+'</b><span>'+esc(item.source_ref||"—")+' · fetched '+esc(item.event_count||0)+' / total '+esc(total)+' · '+esc(item.started_at||"—")+'</span><p>'+esc(item.window_start||"—")+' → '+esc(item.window_end||"—")+(item.error?' · '+esc(item.error):'')+'</p></div>';
   }).join("")||"<div>No live evidence collection has been recorded for this case.</div>";
   q("#caseTimeline").innerHTML=(data.case_timeline||[]).map(item=>
     '<div class="event"><time>'+esc(item.timestamp||"—")+'</time><strong>'+esc(item.kind)+' · '+esc(item.title)+'</strong><p>'+esc(item.detail||"")+'</p></div>'
