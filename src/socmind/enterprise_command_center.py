@@ -269,6 +269,15 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
             alerts = cur.fetchall()
             cur.execute(
                 """
+                SELECT * FROM evidence_requests
+                WHERE case_id=%s
+                ORDER BY created_at DESC
+                """,
+                (case_id,),
+            )
+            evidence_requests = cur.fetchall()
+            cur.execute(
+                """
                 SELECT * FROM evidence_collections
                 WHERE case_id=%s
                 ORDER BY started_at DESC
@@ -288,6 +297,11 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
         row["timestamp"] = _iso(row.get("timestamp"))
         row["created_at"] = _iso(row.get("created_at"))
         row["linked_at"] = _iso(row.get("linked_at"))
+    for row in evidence_requests:
+        row["due_at"] = _iso(row.get("due_at"))
+        row["created_at"] = _iso(row.get("created_at"))
+        row["updated_at"] = _iso(row.get("updated_at"))
+        row["completed_at"] = _iso(row.get("completed_at"))
     for row in collections:
         row["window_start"] = _iso(row.get("window_start"))
         row["window_end"] = _iso(row.get("window_end"))
@@ -299,6 +313,7 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
         "notes": notes,
         "audit": audit,
         "alerts": alerts,
+        "evidence_requests": evidence_requests,
         "evidence_collections": collections,
     }
 
