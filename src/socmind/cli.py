@@ -1072,9 +1072,11 @@ def main() -> None:
         return
 
     if args.command == "case-collect-evidence":
-        postgres_dsn = args.postgres_dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
-        if args.database and postgres_dsn:
-            raise SystemExit("Choose one case store: --database or PostgreSQL.")
+        if args.database and args.postgres_dsn:
+            raise SystemExit("Choose one case store: --database or --postgres-dsn.")
+        postgres_dsn = args.postgres_dsn
+        if not args.database and not postgres_dsn:
+            postgres_dsn = os.environ.get("SOCMIND_POSTGRES_DSN")
         if not args.database and not postgres_dsn:
             raise SystemExit("Pass --database or set/pass SOCMIND_POSTGRES_DSN.")
 
@@ -1136,6 +1138,8 @@ def main() -> None:
             print(f"status={result.status}")
             print(f"window={result.window_start} -> {result.window_end}")
             print(f"fetched_events={result.fetched_events}")
+            print(f"total_hits={result.total_hits if result.total_hits is not None else '-'}")
+            print(f"truncated={result.truncated}")
             print(f"evidence_events={result.evidence_events}")
             print(f"evidence_path={result.evidence_path}")
             print(f"collection_id={result.collection_id}")
