@@ -443,6 +443,7 @@ def command_center_snapshot_pg(
             "p1_active": sum(1 for case in active_all if case.priority == "P1"),
             "unassigned": sum(1 for case in active_all if not case.owner),
             "sla_breached": len(breached),
+            "sla_paused": sum(1 for case in active_all if case.state in PAUSED_STATES),
             "resolved": len(resolved),
             "mtta_minutes": round(sum(mtta_values) / len(mtta_values), 1)
             if mtta_values
