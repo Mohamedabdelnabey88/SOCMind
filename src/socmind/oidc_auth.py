@@ -228,6 +228,21 @@ def decode_signed_payload(value: str, secret: str, *, now: int | None = None) ->
     return payload
 
 
+def safe_return_path(value: str | None) -> str:
+    candidate = str(value or "/")
+    if (
+        not candidate.startswith("/")
+        or candidate.startswith("//")
+        or "\\" in candidate
+        or any(ord(ch) < 32 for ch in candidate)
+    ):
+        return "/"
+    parsed = urlparse(candidate)
+    if parsed.scheme or parsed.netloc:
+        return "/"
+    return candidate
+
+
 def new_authorization_transaction(
     config: OIDCConfig,
     *,
@@ -243,11 +258,7 @@ def new_authorization_transaction(
         "state": state,
         "nonce": nonce,
         "verifier": verifier,
-        "return_to": (
-            str(return_to)
-            if str(return_to).startswith("/") and not str(return_to).startswith("//")
-            else "/"
-        ),
+        "return_to": safe_return_path(return_to),
         "exp": current + 600,
     }
     cookie = encode_signed_payload(transaction, config.session_secret)
