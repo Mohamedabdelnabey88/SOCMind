@@ -343,6 +343,17 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 item["correlation_reasons"] = json.loads(item["correlation_reasons"])
             except (TypeError, json.JSONDecodeError):
                 item["correlation_reasons"] = []
+        evidence_requests = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT * FROM evidence_requests
+                WHERE case_id=?
+                ORDER BY created_at DESC
+                """,
+                (case_id,),
+            ).fetchall()
+        ]
         collections = [
             dict(row)
             for row in conn.execute(
@@ -364,6 +375,7 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
         "notes": notes,
         "audit": audit,
         "alerts": alerts,
+        "evidence_requests": evidence_requests,
         "evidence_collections": collections,
     }
 
