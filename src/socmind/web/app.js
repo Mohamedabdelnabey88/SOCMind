@@ -98,6 +98,10 @@ async function openCase(caseId){
     const technique=a.technique?(' · '+esc(a.technique)):"";
     return '<div><b>'+esc(a.alert_id)+' · '+esc(a.source)+'</b><span>'+esc(a.timestamp)+' · severity '+esc(a.severity)+' · correlation '+esc(a.correlation_score)+rule+technique+'</span><p>'+esc(a.title)+'</p>'+(reasons?'<ul>'+reasons+'</ul>':'<p class="score">Root alert / no correlation reason required.</p>')+'</div>';
   }).join("")||"<div>No orchestrated alerts linked to this case.</div>";
+  q("#caseEvidenceCollections").innerHTML=(data.evidence_collections||[]).map(item=>{
+    const status=item.status==="completed"?"✓ completed":"⚠ "+esc(item.status||"unknown");
+    return '<div><b>'+status+' · '+esc(item.provider||"unknown")+'</b><span>'+esc(item.source_ref||"—")+' · '+esc(item.event_count||0)+' event(s) · '+esc(item.started_at||"—")+'</span><p>'+esc(item.window_start||"—")+' → '+esc(item.window_end||"—")+(item.error?' · '+esc(item.error):'')+'</p></div>';
+  }).join("")||"<div>No live evidence collection has been recorded for this case.</div>";
   q("#caseTimeline").innerHTML=(data.case_timeline||[]).map(item=>
     '<div class="event"><time>'+esc(item.timestamp||"—")+'</time><strong>'+esc(item.kind)+' · '+esc(item.title)+'</strong><p>'+esc(item.detail||"")+'</p></div>'
   ).join("")||"<div>No operational timeline entries yet.</div>";
