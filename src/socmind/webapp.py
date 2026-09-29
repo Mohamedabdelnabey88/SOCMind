@@ -16,6 +16,15 @@ from .detection_replay import detection_replay_payload
 from .detections import load_rules
 from .enterprise_auth import AuthConfig, authenticate
 from .evidence_integrity import evidence_manifest_path, verification_payload, verify_evidence_manifest
+from .evidence_requests import (
+    create_requirement_pg,
+    create_requirement_sqlite,
+    ensure_suggested_requirements_pg,
+    ensure_suggested_requirements_sqlite,
+    suggestion_payload,
+    update_requirement_pg,
+    update_requirement_sqlite,
+)
 from .enterprise_command_center import (
     acknowledge_case_pg,
     add_case_note_pg,
@@ -311,6 +320,69 @@ def create_app(
             disposition=disposition,
         )
 
+    def case_events_for_requirements(case_id: str):
+        detail = store_detail(case_id)
+        evidence_value = (detail.get("case") or {}).get("evidence_path")
+        if evidence_value and Path(evidence_value).is_file():
+            return load_jsonl(evidence_value)
+        if case_id == app.state.case_id:
+            return load_jsonl(app.state.events_path)
+        return []
+
+    def store_create_requirement(case_id: str, request: dict, actor: str):
+        kind, target = require_store()
+        kwargs = {
+            "case_id": case_id,
+            "key": request.get("key"),
+            "title": request.get("title"),
+            "source": request.get("source"),
+            "target": request.get("target"),
+            "rationale": request.get("rationale"),
+            "requested_by": actor,
+            "assigned_to": request.get("assigned_to"),
+            "due_hours": request.get("due_hours", 4),
+        }
+        if kind == "postgres":
+            return create_requirement_pg(target, **kwargs)
+        return create_requirement_sqlite(target, **kwargs)
+
+    def store_generate_requirements(
+        case_id: str,
+        actor: str,
+        *,
+        assigned_to=None,
+        due_hours=4,
+    ):
+        events = case_events_for_requirements(case_id)
+        if not events:
+            raise ValueError(
+                "No case evidence is available to derive evidence requirements"
+            )
+        kind, target = require_store()
+        kwargs = {
+            "case_id": case_id,
+            "events": events,
+            "requested_by": actor,
+            "assigned_to": assigned_to,
+            "due_hours": due_hours,
+        }
+        if kind == "postgres":
+            return ensure_suggested_requirements_pg(target, **kwargs)
+        return ensure_suggested_requirements_sqlite(target, **kwargs)
+
+    def store_update_requirement(requirement_id: str, request: dict, actor: str):
+        kind, target = require_store()
+        kwargs = {
+            "status": request.get("status"),
+            "actor": actor,
+            "response_summary": request.get("response_summary"),
+            "evidence_reference": request.get("evidence_reference"),
+            "assigned_to": request.get("assigned_to"),
+        }
+        if kind == "postgres":
+            return update_requirement_pg(target, requirement_id, **kwargs)
+        return update_requirement_sqlite(target, requirement_id, **kwargs)
+
     def enterprise_audit(
         *,
         case_id: str,
@@ -421,6 +493,107 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return evidence_integrity_for_detail(detail)
+
+    @app.get("/api/cases/{target_case_id}/evidence-requirements/suggestions")
+    def evidence_requirement_suggestions(
+        target_case_id: str,
+        user: Principal = Depends(allowed("evidence.read")),
+    ):
+        try:
+            store_detail(target_case_id)
+            return suggestion_payload(
+                case_events_for_requirements(target_case_id)
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/cases/{target_case_id}/evidence-requirements")
+    def create_evidence_requirement(
+        target_case_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(allowed("evidence.request")),
+    ):
+        try:
+            requirement_id = store_create_requirement(
+                target_case_id,
+                request,
+                user.subject,
+            )
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action="evidence.requirement.create",
+                detail=f"Evidence requirement {requirement_id}",
+            )
+            return {
+                "requirement_id": requirement_id,
+                **store_detail(target_case_id),
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/cases/{target_case_id}/evidence-requirements/generate")
+    def generate_evidence_requirements(
+        target_case_id: str,
+        request: dict = Body(default={}),
+        user: Principal = Depends(allowed("evidence.request")),
+    ):
+        try:
+            requirement_ids = store_generate_requirements(
+                target_case_id,
+                user.subject,
+                assigned_to=request.get("assigned_to"),
+                due_hours=request.get("due_hours", 4),
+            )
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action="evidence.requirement.generate",
+                detail=f"Generated/resolved {len(requirement_ids)} requirement(s)",
+            )
+            return {
+                "requirement_ids": requirement_ids,
+                **store_detail(target_case_id),
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/evidence-requirements/{requirement_id}")
+    def update_evidence_requirement(
+        requirement_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(principal),
+    ):
+        target_status = str(request.get("status", "")).strip().lower()
+        permission = (
+            "evidence.waive"
+            if target_status == "waived"
+            else "evidence.request"
+            if target_status == "requested"
+            else "evidence.manage"
+        )
+        try:
+            require_permission(user, permission)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+        try:
+            case_id = store_update_requirement(
+                requirement_id,
+                request,
+                user.subject,
+            )
+            enterprise_audit(
+                case_id=case_id,
+                user=user,
+                action="evidence.requirement.update",
+                detail=f"{requirement_id} -> {target_status}",
+            )
+            return store_detail(case_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/cases/{target_case_id}/acknowledge")
     def acknowledge(
