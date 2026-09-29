@@ -69,7 +69,10 @@
               <option value="">Transition…</option>
               <option value="triage">triage</option>
               <option value="investigating">investigating</option>
+              <option value="waiting-for-evidence">waiting-for-evidence</option>
+              <option value="waiting-for-user">waiting-for-user</option>
               <option value="contained">contained</option>
+              <option value="monitoring">monitoring</option>
               <option value="resolved">resolved</option>
               <option value="false-positive">false-positive</option>
             </select>
@@ -87,6 +90,27 @@
               <div id="caseAlerts" class="stack compact"></div>
             </div>
             <div id="linkedInvestigation" class="linked-investigation"></div>
+          </div>
+          <div class="grid two detail-grid" style="margin-top:16px">
+            <div>
+              <h3>Evidence Requests</h3>
+              <div id="caseEvidenceRequests" class="stack compact"></div>
+            </div>
+            <div>
+              <h3>Create Evidence Request</h3>
+              <div class="note-form">
+                <input id="evidenceRequestKind" placeholder="Type: MFA / IdP / EDR / VPN / User validation">
+                <textarea id="evidenceRequestDescription" placeholder="What evidence is required and why?"></textarea>
+                <input id="evidenceRequestOwner" placeholder="Owner (optional)">
+                <select id="evidenceRequestPriority">
+                  <option value="normal">normal</option>
+                  <option value="high">high</option>
+                  <option value="urgent">urgent</option>
+                </select>
+                <input id="evidenceRequestDue" type="datetime-local">
+                <button id="createEvidenceRequest">Create Request</button>
+              </div>
+            </div>
           </div>
           <div style="margin-top:16px">
             <h3>Evidence Collection History</h3>
