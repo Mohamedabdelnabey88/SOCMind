@@ -45,12 +45,29 @@ def elastic_document_to_event(raw: dict) -> Event:
         src_ip=_dig(source, "source", "ip"),
         dst_ip=_dig(source, "destination", "ip"),
         command_line=_dig(source, "process", "command_line"),
-        data={"ecs": source, "elastic_id": raw.get("_id")},
+        data={
+            "ecs": source,
+            "elastic_id": raw.get("_id"),
+            "elastic_index": raw.get("_index"),
+        },
     )
 
 
+def parse_elastic_hit(raw: dict) -> Event:
+    """Backward-compatible normalized ECS hit parser used by live evidence."""
+    return elastic_document_to_event(raw)
+
+
+def parse_elastic_hits(hits: list[dict]) -> list[Event]:
+    return [
+        elastic_document_to_event(hit)
+        for hit in hits
+        if isinstance(hit, dict)
+    ]
+
+
 def elastic_search_hits_to_events(hits: list[dict]) -> list[Event]:
-    return [elastic_document_to_event(hit) for hit in hits]
+    return parse_elastic_hits(hits)
 
 
 def parse_elastic_ndjson(path: str | Path) -> list[Event]:
