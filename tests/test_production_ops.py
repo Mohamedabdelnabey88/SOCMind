@@ -7,7 +7,6 @@ from socmind.production_ops import (
     AlertRecord,
     alert_from_event,
     alert_priority,
-    alert_from_event,
     collect_evidence_window,
     correlate_alerts,
 )
@@ -195,3 +194,61 @@ def test_evidence_collector_excludes_unrelated_context():
     )
     window = collect_evidence_window(alert, [related, unrelated, outside])
     assert window.events == [related]
+
+
+def test_same_host_rule_and_technique_do_not_auto_merge_without_context_anchor():
+    ts = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+    first = AlertRecord(
+        "NOISY-1",
+        "elastic",
+        ts,
+        "Shared server detection",
+        10,
+        "SHARED-SERVER",
+        technique="T1059.001",
+        rule_id="POWERSHELL-RULE",
+    )
+    second = AlertRecord(
+        "NOISY-2",
+        "elastic",
+        ts + timedelta(minutes=2),
+        "Shared server detection",
+        10,
+        "SHARED-SERVER",
+        technique="T1059.001",
+        rule_id="POWERSHELL-RULE",
+    )
+    result = correlate_alerts(first, second)
+    assert result.score == 55
+    assert result.related is False
+
+
+def test_cross_host_alerts_can_correlate_when_multiple_context_anchors_agree():
+    ts = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+    first = AlertRecord(
+        "LATERAL-1",
+        "elastic",
+        ts,
+        "Potential lateral movement",
+        10,
+        "WS-01",
+        user="analyst",
+        process="powershell.exe",
+        src_ip="198.51.100.50",
+        technique="T1021",
+    )
+    second = AlertRecord(
+        "LATERAL-2",
+        "elastic",
+        ts + timedelta(minutes=4),
+        "Potential lateral movement",
+        10,
+        "WS-02",
+        user="analyst",
+        process="powershell.exe",
+        src_ip="198.51.100.50",
+        technique="T1021",
+    )
+    result = correlate_alerts(first, second)
+    assert result.score >= 55
+    assert result.related is True
