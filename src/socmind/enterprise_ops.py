@@ -143,6 +143,8 @@ CREATE TABLE IF NOT EXISTS evidence_collections (
   query_json JSONB NOT NULL,
   status TEXT NOT NULL,
   event_count INTEGER NOT NULL DEFAULT 0,
+  total_hits INTEGER,
+  truncated BOOLEAN NOT NULL DEFAULT FALSE,
   error TEXT,
   started_at TIMESTAMPTZ NOT NULL,
   completed_at TIMESTAMPTZ
