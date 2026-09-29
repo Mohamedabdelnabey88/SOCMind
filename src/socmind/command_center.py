@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -91,21 +92,45 @@ CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
 """
 
 
+def _retry_locked(operation, *, attempts: int = 8):
+    delay = 0.02
+    for attempt in range(attempts):
+        try:
+            return operation()
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.5)
+
+
 def connect(path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path), timeout=10.0)
+    conn = sqlite3.connect(str(path), timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+
+    current_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    if str(current_mode).lower() != "wal":
+        _retry_locked(lambda: conn.execute("PRAGMA journal_mode=WAL").fetchone())
+
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=10000")
-    conn.executescript(SCHEMA)
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
+    _retry_locked(lambda: conn.executescript(SCHEMA))
+
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(cases)").fetchall()
+    }
     for name, sql_type in {
         "acknowledged_at": "TEXT",
         "evidence_path": "TEXT",
     }.items():
         if name not in columns:
-            conn.execute(f"ALTER TABLE cases ADD COLUMN {name} {sql_type}")
+            _retry_locked(
+                lambda name=name, sql_type=sql_type: conn.execute(
+                    f"ALTER TABLE cases ADD COLUMN {name} {sql_type}"
+                )
+            )
     conn.commit()
     return conn
 
