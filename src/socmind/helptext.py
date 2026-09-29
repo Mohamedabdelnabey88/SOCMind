@@ -227,6 +227,16 @@ Outcomes:
 - DUPLICATE: the same source alert ID was already ingested
 
 Correlation is deterministic and auditable. It does not claim attacker attribution.
+
+Evidence requests:
+  socmind evidence-suggest normalized.jsonl --json
+
+Advanced case states:
+  waiting-for-evidence
+  waiting-for-user
+  monitoring
+
+In the web workspace, validation gaps can be converted into tracked evidence requests with assignment, due time, fulfillment summary, and evidence reference.
 """,
     "demo": """SOCMind Portfolio Demo
 
