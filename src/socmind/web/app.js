@@ -140,7 +140,7 @@ async function openCase(caseId){
     return '<div><b>'+truncated+status+' · '+esc(item.provider||"unknown")+'</b><span>'+esc(item.source_ref||"—")+' · fetched '+esc(item.event_count||0)+' / total '+esc(total)+' · '+esc(item.started_at||"—")+'</span><p>'+esc(item.window_start||"—")+' → '+esc(item.window_end||"—")+(item.error?' · '+esc(item.error):'')+'</p></div>';
   }).join("")||"<div>No live evidence collection has been recorded for this case.</div>";
   q("#caseTimeline").innerHTML=(data.case_timeline||[]).map(item=>
-    '<div class="event"><time>'+esc(item.timestamp||"—")+'</time><strong>'+esc(item.kind)+' · '+esc(item.title)+'</strong><p>'+esc(item.detail||"")+'</p></div>'
+    '<div class="event"><time>'+esc(item.timestamp||"—")+'</time><strong>'+esc(item.type||item.kind)+' · '+esc(item.title)+'</strong><span>'+esc(item.source||"unknown source")+(item.actor?' · '+esc(item.actor):'')+'</span><p>'+esc(item.detail||"")+'</p></div>'
   ).join("")||"<div>No operational timeline entries yet.</div>";
   const integrity=data.evidence_integrity||{};
   const integrityText=integrity.valid===true?"Integrity VALID":integrity.valid===false?"Integrity INVALID":integrity.reason==="manifest-missing"?"Integrity manifest missing":"Integrity unavailable";
@@ -208,6 +208,23 @@ async function createEvidenceRequirement(){
   await openCase(currentCaseId);await loadCommandCenter();
 }
 
+async function recordCaseActivity(type){
+  if(!currentCaseId)return;
+  const detail=prompt(type==="escalation"?"Escalation reason / destination":"Detection feedback / follow-up action");
+  if(!detail||!detail.trim())return;
+  const res=await apiFetch("/api/cases/"+encodeURIComponent(currentCaseId)+"/activities",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({type,detail:detail.trim()})
+  });
+  if(!res.ok){
+    const e=await res.json().catch(()=>({detail:"Case activity failed"}));
+    alert(e.detail||"Case activity failed");
+    return;
+  }
+  await openCase(currentCaseId);
+}
+
 async function mutateCase(path,body=null){
   if(!currentCaseId)return;
   const opts={method:"POST",headers:{"Content-Type":"application/json"}};
@@ -227,6 +244,8 @@ q("#transitionCase").addEventListener("click",()=>{
 q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim();if(!text)return;mutateCase("/notes",{text}).then(()=>q("#noteText").value="");});
 q("#generateEvidenceRequirements").addEventListener("click",generateEvidenceRequirements);
 q("#createEvidenceRequirement").addEventListener("click",createEvidenceRequirement);
+q("#recordEscalation").addEventListener("click",()=>recordCaseActivity("escalation"));
+q("#recordDetectionFeedback").addEventListener("click",()=>recordCaseActivity("detection-feedback"));
 
 async function loadLeadHealth(){
   try{
