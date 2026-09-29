@@ -265,21 +265,9 @@ def create_requirement_sqlite(
         if case is None:
             raise ValueError(f"Unknown case: {case_id}")
 
-        existing = conn.execute(
+        cur = conn.execute(
             """
-            SELECT requirement_id
-            FROM evidence_requirements
-            WHERE case_id=? AND key=? AND status IN ('required','requested')
-            LIMIT 1
-            """,
-            (case_id, clean_key),
-        ).fetchone()
-        if existing is not None:
-            return str(existing["requirement_id"])
-
-        conn.execute(
-            """
-            INSERT INTO evidence_requirements(
+            INSERT OR IGNORE INTO evidence_requirements(
               requirement_id,case_id,key,title,source,target,rationale,status,
               requested_by,assigned_to,due_at,created_at,updated_at,
               received_at,response_summary,evidence_reference
@@ -304,6 +292,21 @@ def create_requirement_sqlite(
                 None,
             ),
         )
+        if cur.rowcount == 0:
+            existing = conn.execute(
+                """
+                SELECT requirement_id
+                FROM evidence_requirements
+                WHERE case_id=? AND key=?
+                  AND status IN ('required','requested')
+                LIMIT 1
+                """,
+                (case_id, clean_key),
+            ).fetchone()
+            if existing is None:
+                raise RuntimeError("Evidence requirement could not be created")
+            return str(existing["requirement_id"])
+
         conn.execute(
             """
             INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
@@ -467,21 +470,6 @@ def create_requirement_pg(
 
             cur.execute(
                 """
-                SELECT requirement_id
-                FROM evidence_requirements
-                WHERE case_id=%s AND key=%s
-                  AND status IN ('required','requested')
-                LIMIT 1
-                FOR UPDATE
-                """,
-                (case_id, clean_key),
-            )
-            existing = cur.fetchone()
-            if existing is not None:
-                return str(existing["requirement_id"])
-
-            cur.execute(
-                """
                 INSERT INTO evidence_requirements(
                   requirement_id,case_id,key,title,source,target,rationale,status,
                   requested_by,assigned_to,due_at,created_at,updated_at,
@@ -490,6 +478,7 @@ def create_requirement_pg(
                   %s,%s,%s,%s,%s,%s,%s,%s,
                   %s,%s,%s,%s,%s,%s,%s,%s
                 )
+                ON CONFLICT DO NOTHING
                 """,
                 (
                     requirement_id,
@@ -510,6 +499,22 @@ def create_requirement_pg(
                     None,
                 ),
             )
+            if cur.rowcount == 0:
+                cur.execute(
+                    """
+                    SELECT requirement_id
+                    FROM evidence_requirements
+                    WHERE case_id=%s AND key=%s
+                      AND status IN ('required','requested')
+                    LIMIT 1
+                    """,
+                    (case_id, clean_key),
+                )
+                existing = cur.fetchone()
+                if existing is None:
+                    raise RuntimeError("Evidence requirement could not be created")
+                return str(existing["requirement_id"])
+
             cur.execute(
                 """
                 INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
