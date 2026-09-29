@@ -9,7 +9,7 @@ from .adapters import (
     parse_auditd,
     parse_auth_log,
     parse_elastic_ndjson,
-    parse_elastic_hits,
+    elastic_search_hits_to_events,
     parse_evtx,
     parse_journald_json,
     parse_wazuh_alerts,
@@ -47,7 +47,6 @@ from .hypothesis import generate_hypotheses
 from .integrations import ElasticClient, WazuhClient, integration_check
 from .io import load_jsonl
 from .lead_metrics import lead_snapshot
-from .live_evidence import collect_case_evidence_postgres, collect_case_evidence_sqlite, collection_payload
 from .quality_gate import load_checklist, quality_payload, render_quality_review
 from .ioc import extract_iocs
 from .notes import append_note
@@ -435,43 +434,26 @@ def build_parser() -> argparse.ArgumentParser:
     alert_ops.add_argument("--evidence-after", type=int, default=15)
     alert_ops.add_argument("--json", action="store_true")
 
-    live_alerts = sub.add_parser(
+    live_ops = sub.add_parser(
         "alert-live",
         help="Pull live Elastic/Wazuh Indexer alerts and orchestrate them into SOC cases",
     )
-    live_alerts.add_argument("provider", choices=["elastic", "wazuh-indexer"])
-    live_alerts.add_argument("base_url")
-    live_alerts.add_argument("index")
-    live_store = live_alerts.add_mutually_exclusive_group(required=True)
+    live_ops.add_argument("provider", choices=["elastic", "wazuh-indexer"])
+    live_ops.add_argument("url")
+    live_ops.add_argument("index")
+    live_store = live_ops.add_mutually_exclusive_group(required=True)
     live_store.add_argument("--database", help="SQLite command-center database")
-    live_store.add_argument("--postgres-dsn", help="PostgreSQL DSN; defaults to SOCMIND_POSTGRES_DSN")
-    live_alerts.add_argument("--size", type=int, default=100)
-    live_alerts.add_argument("--query-file")
-    live_alerts.add_argument("--evidence", help="Optional normalized evidence JSONL; defaults to pulled alert events")
-    live_alerts.add_argument("--evidence-dir", default="socmind-evidence")
-    live_alerts.add_argument("--correlation-window", type=int, default=15)
-    live_alerts.add_argument("--correlation-threshold", type=int, default=55)
-    live_alerts.add_argument("--evidence-before", type=int, default=15)
-    live_alerts.add_argument("--evidence-after", type=int, default=15)
-    live_alerts.add_argument("--insecure", action="store_true", help="Disable TLS verification for controlled lab use only")
-    live_alerts.add_argument("--json", action="store_true")
-
-    live_evidence = sub.add_parser(
-        "case-collect-evidence",
-        help="Collect live Elastic/Wazuh Indexer evidence for an orchestrated case",
-    )
-    live_evidence.add_argument("case_id")
-    live_evidence.add_argument("provider", choices=["elastic", "wazuh-indexer"])
-    live_evidence.add_argument("base_url")
-    live_evidence.add_argument("index")
-    live_evidence.add_argument("--database", help="SQLite command-center database")
-    live_evidence.add_argument("--postgres-dsn", help="PostgreSQL DSN; defaults to SOCMIND_POSTGRES_DSN")
-    live_evidence.add_argument("--evidence-dir", default="socmind-evidence")
-    live_evidence.add_argument("--before", type=int, default=15, help="Minutes before earliest linked alert")
-    live_evidence.add_argument("--after", type=int, default=15, help="Minutes after latest linked alert")
-    live_evidence.add_argument("--max-events", type=int, default=2000)
-    live_evidence.add_argument("--insecure", action="store_true", help="Disable TLS verification for controlled lab use only")
-    live_evidence.add_argument("--json", action="store_true")
+    live_store.add_argument("--postgres-dsn", help="PostgreSQL DSN; prefer SOCMIND_POSTGRES_DSN")
+    live_ops.add_argument("--size", type=int, default=100)
+    live_ops.add_argument("--query-file")
+    live_ops.add_argument("--evidence", help="Optional normalized evidence JSONL; defaults to pulled alert events")
+    live_ops.add_argument("--evidence-dir", default="socmind-evidence")
+    live_ops.add_argument("--correlation-window", type=int, default=15)
+    live_ops.add_argument("--correlation-threshold", type=int, default=55)
+    live_ops.add_argument("--evidence-before", type=int, default=15)
+    live_ops.add_argument("--evidence-after", type=int, default=15)
+    live_ops.add_argument("--insecure", action="store_true")
+    live_ops.add_argument("--json", action="store_true")
 
     return parser
 
@@ -1023,24 +1005,18 @@ def main() -> None:
         if args.provider == "wazuh-indexer":
             api_key = None
             bearer_token = os.environ.get("WAZUH_INDEXER_JWT")
-            username = (
-                os.environ.get("WAZUH_INDEXER_USER")
-                or os.environ.get("WAZUH_INDEXER_USERNAME")
-            )
+            username = os.environ.get("WAZUH_INDEXER_USERNAME")
             password = os.environ.get("WAZUH_INDEXER_PASSWORD")
             sort_field = "timestamp"
         else:
             api_key = os.environ.get("ELASTIC_API_KEY")
             bearer_token = os.environ.get("ELASTIC_BEARER_TOKEN")
-            username = (
-                os.environ.get("ELASTIC_USER")
-                or os.environ.get("ELASTIC_USERNAME")
-            )
+            username = os.environ.get("ELASTIC_USERNAME")
             password = os.environ.get("ELASTIC_PASSWORD")
             sort_field = "@timestamp"
 
         client = ElasticClient(
-            args.base_url,
+            args.url,
             api_key=api_key,
             bearer_token=bearer_token,
             username=username,
@@ -1057,14 +1033,14 @@ def main() -> None:
         alert_events = (
             wazuh_search_hits_to_events(hits)
             if args.provider == "wazuh-indexer"
-            else parse_elastic_hits(hits)
+            else elastic_search_hits_to_events(hits)
         )
         evidence_events = (
             load_jsonl(args.evidence)
             if args.evidence
             else alert_events
         )
-        postgres_dsn = args.postgres_dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
+        dsn = args.postgres_dsn or os.environ.get("SOCMIND_POSTGRES_DSN")
         results = []
         for event in alert_events:
             alert = alert_from_event(event)
@@ -1080,10 +1056,10 @@ def main() -> None:
                     evidence_after_minutes=args.evidence_after,
                 )
             else:
-                if not postgres_dsn:
+                if not dsn:
                     raise SystemExit("Set SOCMIND_POSTGRES_DSN or pass --postgres-dsn.")
                 result = orchestrate_alert_postgres(
-                    postgres_dsn,
+                    dsn,
                     alert,
                     evidence_events,
                     evidence_dir=args.evidence_dir,
@@ -1094,8 +1070,6 @@ def main() -> None:
                 )
             results.append({
                 "alert_id": alert.alert_id,
-                "title": alert.title,
-                "source": alert.source,
                 "case_id": result.case_id,
                 "created": result.created,
                 "duplicate": result.duplicate,
@@ -1214,80 +1188,6 @@ def main() -> None:
                 )
                 for reason in item["correlation_reasons"]:
                     print(f"  - {reason['detail']}")
-        return
-
-    if args.command == "case-collect-evidence":
-        if args.database and args.postgres_dsn:
-            raise SystemExit("Choose one case store: --database or --postgres-dsn.")
-        postgres_dsn = args.postgres_dsn
-        if not args.database and not postgres_dsn:
-            postgres_dsn = os.environ.get("SOCMIND_POSTGRES_DSN")
-        if not args.database and not postgres_dsn:
-            raise SystemExit("Pass --database or set/pass SOCMIND_POSTGRES_DSN.")
-
-        if args.provider == "elastic":
-            client = ElasticClient(
-                args.base_url,
-                api_key=os.environ.get("ELASTIC_API_KEY"),
-                bearer_token=os.environ.get("ELASTIC_BEARER_TOKEN"),
-                username=os.environ.get("ELASTIC_USER"),
-                password=os.environ.get("ELASTIC_PASSWORD"),
-                verify_tls=not args.insecure,
-            )
-        else:
-            user = os.environ.get("WAZUH_INDEXER_USER")
-            password = os.environ.get("WAZUH_INDEXER_PASSWORD")
-            if not user or not password:
-                raise SystemExit(
-                    "Set WAZUH_INDEXER_USER and WAZUH_INDEXER_PASSWORD."
-                )
-            client = ElasticClient(
-                args.base_url,
-                username=user,
-                password=password,
-                verify_tls=not args.insecure,
-            )
-
-        kwargs = {
-            "provider": args.provider,
-            "index": args.index,
-            "evidence_dir": args.evidence_dir,
-            "before_minutes": args.before,
-            "after_minutes": args.after,
-            "max_events": args.max_events,
-        }
-        if args.database:
-            result = collect_case_evidence_sqlite(
-                args.database,
-                args.case_id,
-                client,
-                **kwargs,
-            )
-        else:
-            result = collect_case_evidence_postgres(
-                postgres_dsn,
-                args.case_id,
-                client,
-                **kwargs,
-            )
-
-        payload = collection_payload(result)
-        if args.json:
-            print(json.dumps(payload, indent=2))
-        else:
-            print("SOCMind Live Evidence Collection")
-            print("===============================")
-            print(f"case={result.case_id}")
-            print(f"provider={result.provider}")
-            print(f"source={result.source_ref}")
-            print(f"status={result.status}")
-            print(f"window={result.window_start} -> {result.window_end}")
-            print(f"fetched_events={result.fetched_events}")
-            print(f"total_hits={result.total_hits if result.total_hits is not None else '-'}")
-            print(f"truncated={result.truncated}")
-            print(f"evidence_events={result.evidence_events}")
-            print(f"evidence_path={result.evidence_path}")
-            print(f"collection_id={result.collection_id}")
         return
 
     if args.command == "enterprise-info":
