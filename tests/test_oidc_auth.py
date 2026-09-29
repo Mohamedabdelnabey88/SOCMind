@@ -65,6 +65,42 @@ def test_oidc_config_rejects_non_https_non_loopback():
     assert validate_oidc_config(local) is local
 
 
+def test_authorization_transaction_rejects_protocol_relative_return_path():
+    config = _config()
+    cookie, _ = new_authorization_transaction(
+        config,
+        return_to="//evil.example",
+        now=1_900_000_000,
+    )
+    transaction = decode_signed_payload(cookie, SECRET, now=1_900_000_001)
+    assert transaction["return_to"] == "/"
+
+
+def test_oidc_session_rejects_different_issuer():
+    config = _config()
+    now = int(time.time())
+    cookie, _ = session_from_claims(
+        config,
+        {
+            "iss": config.issuer,
+            "sub": "alice@example.com",
+            "exp": now + 600,
+            "groups": ["SOC-T1"],
+        },
+        now=now,
+    )
+    with pytest.raises(PermissionError, match="issuer"):
+        authenticate(
+            {"cookie": f"{config.session_cookie}={cookie}"},
+            AuthConfig(
+                mode="oidc",
+                oidc_session_secret=SECRET,
+                oidc_session_cookie=config.session_cookie,
+                oidc_issuer="https://other-idp.example.test",
+            ),
+        )
+
+
 def test_signed_session_detects_tamper_and_expiry():
     valid = encode_signed_payload(
         {"sub": "alice", "role": "analyst", "exp": 2_000_000_000},
