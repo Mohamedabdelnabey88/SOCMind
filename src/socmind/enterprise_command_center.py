@@ -267,6 +267,15 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
                 (case_id,),
             )
             alerts = cur.fetchall()
+            cur.execute(
+                """
+                SELECT * FROM evidence_collections
+                WHERE case_id=%s
+                ORDER BY started_at DESC
+                """,
+                (case_id,),
+            )
+            collections = cur.fetchall()
 
     case_payload = dict(case)
     for key in ("opened_at", "updated_at", "acknowledged_at"):
@@ -279,11 +288,18 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
         row["timestamp"] = _iso(row.get("timestamp"))
         row["created_at"] = _iso(row.get("created_at"))
         row["linked_at"] = _iso(row.get("linked_at"))
+    for row in collections:
+        row["window_start"] = _iso(row.get("window_start"))
+        row["window_end"] = _iso(row.get("window_end"))
+        row["started_at"] = _iso(row.get("started_at"))
+        row["completed_at"] = _iso(row.get("completed_at"))
+        row["query"] = row.pop("query_json", {})
     return {
         "case": case_payload,
         "notes": notes,
         "audit": audit,
         "alerts": alerts,
+        "evidence_collections": collections,
     }
 
 

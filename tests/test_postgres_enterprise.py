@@ -20,6 +20,7 @@ from socmind.postgres_store import initialize_postgres, postgres_health, _psycop
 from socmind.orchestration import orchestrate_alert_postgres
 from socmind.production_ops import AlertRecord
 from socmind.io import load_jsonl
+from socmind.live_evidence import collect_case_evidence_postgres
 from socmind.webapp import create_app
 
 
@@ -38,7 +39,7 @@ def reset_database():
     initialize_postgres(DSN)
     with psycopg.connect(DSN) as conn:
         with conn.cursor() as cur:
-            cur.execute("TRUNCATE TABLE case_alerts, alerts, case_audit, case_notes, cases RESTART IDENTITY CASCADE")
+            cur.execute("TRUNCATE TABLE evidence_collections, case_alerts, alerts, case_audit, case_notes, cases RESTART IDENTITY CASCADE")
         conn.commit()
 
 
@@ -73,7 +74,7 @@ def test_postgres_enterprise_store_round_trip():
 
     health = postgres_health(DSN)
     assert health["ready"]
-    assert health["socmind_tables"] == 5
+    assert health["socmind_tables"] == 6
 
 
 def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):
@@ -236,3 +237,63 @@ def test_concurrent_postgres_alerts_collapse_into_one_case(tmp_path):
     assert sum(1 for item in results if item.created) == 1
     detail = case_detail_pg(DSN, results[0].case_id)
     assert len(detail["alerts"]) == 2
+
+
+def test_postgres_live_evidence_collection_journal(tmp_path):
+    reset_database()
+    events = load_jsonl(ROOT / "examples/attack_chain.jsonl")
+    base = events[0]
+    evidence_dir = tmp_path / "evidence"
+
+    alert = AlertRecord(
+        "PG-LIVE-001",
+        "elastic",
+        base.timestamp,
+        "PostgreSQL live evidence",
+        12,
+        base.host,
+        user=base.user,
+        src_ip=base.src_ip,
+        rule_id="PG-LIVE-RULE",
+    )
+    orchestrated = orchestrate_alert_postgres(
+        DSN,
+        alert,
+        events,
+        evidence_dir=tmp_path / "initial",
+    )
+
+    class FakeElastic:
+        def search(self, index, *, query=None, size=100, sort=None):
+            return {
+                "hits": {
+                    "hits": [{
+                        "_id": "pg-live-hit-1",
+                        "_index": "logs-*",
+                        "_source": {
+                            "@timestamp": base.timestamp.isoformat(),
+                            "event": {"code": base.event_id},
+                            "host": {"name": base.host},
+                            "user": {"name": base.user},
+                            "source": {"ip": base.src_ip},
+                        },
+                    }]
+                }
+            }
+
+    result = collect_case_evidence_postgres(
+        DSN,
+        orchestrated.case_id,
+        FakeElastic(),
+        provider="elastic",
+        index="logs-*",
+        evidence_dir=evidence_dir,
+    )
+    assert result.status == "completed"
+    assert result.fetched_events == 1
+
+    detail = case_detail_pg(DSN, orchestrated.case_id)
+    assert detail["evidence_collections"]
+    assert detail["evidence_collections"][0]["status"] == "completed"
+    assert detail["evidence_collections"][0]["event_count"] == 1
+    assert detail["evidence_collections"][0]["query"]["bool"]

@@ -56,6 +56,20 @@ def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
             ),
         })
 
+    for collection in detail.get("evidence_collections") or []:
+        items.append({
+            "timestamp": collection.get("completed_at") or collection.get("started_at"),
+            "kind": "evidence-collection",
+            "title": (
+                f"Evidence collection · {collection.get('provider') or 'unknown'} · "
+                f"{collection.get('status') or 'unknown'}"
+            ),
+            "detail": (
+                f"{collection.get('source_ref') or 'unknown source'} · "
+                f"{collection.get('event_count', 0)} event(s)"
+            ),
+        })
+
     for note in detail.get("notes") or []:
         items.append({
             "timestamp": note.get("created_at"),

@@ -159,3 +159,102 @@ This milestone does not yet claim:
 Those are subsequent v1.6 production-operations milestones.
 
 The current milestone establishes the case-orchestration core they can safely build on.
+
+
+## Milestone 2 — Live Evidence Collector
+
+SOCMind can now use the alerts already linked to a case to build an auditable live evidence query against an Elasticsearch-compatible backend.
+
+Supported provider modes:
+
+- `elastic`
+- `wazuh-indexer` (Elasticsearch/OpenSearch-compatible Wazuh Indexer API)
+
+The collector derives:
+
+- earliest/latest linked-alert timestamp
+- configurable before/after collection window
+- hosts
+- users
+- processes
+- source IPs
+- destination IPs
+
+It then builds a bounded query and merges normalized results into the case evidence package.
+
+### Elastic
+
+```bash
+export ELASTIC_API_KEY='...'
+
+socmind case-collect-evidence INC-2026-001 \
+  elastic \
+  https://elastic.internal:9200 \
+  'logs-*' \
+  --database socmind.db \
+  --evidence-dir evidence
+```
+
+PostgreSQL:
+
+```bash
+export SOCMIND_POSTGRES_DSN='postgresql://socmind:password@db:5432/socmind'
+export ELASTIC_API_KEY='...'
+
+socmind case-collect-evidence INC-2026-001 \
+  elastic \
+  https://elastic.internal:9200 \
+  'logs-*' \
+  --postgres-dsn "$SOCMIND_POSTGRES_DSN" \
+  --evidence-dir /var/lib/socmind/evidence
+```
+
+### Wazuh Indexer
+
+```bash
+export WAZUH_INDEXER_USER='socmind'
+export WAZUH_INDEXER_PASSWORD='...'
+
+socmind case-collect-evidence INC-2026-001 \
+  wazuh-indexer \
+  https://wazuh-indexer.internal:9200 \
+  'wazuh-alerts-*' \
+  --database socmind.db \
+  --evidence-dir evidence
+```
+
+TLS verification is on by default. `--insecure` is intended only for controlled lab environments using self-signed certificates.
+
+### Collection journal
+
+Every live collection records:
+
+- collection ID
+- case ID
+- provider
+- source index/pattern
+- exact time window
+- exact generated query
+- started/completed timestamps
+- status
+- event count
+- provider error, if any
+
+Collection success/failure also appears in the case audit trail and the unified case timeline.
+
+Provider failure is never silently treated as an empty successful result.
+
+### Query semantics
+
+SOCMind uses the linked alerts as investigation context rather than issuing an unbounded search.
+
+The query always filters by the case alert time window and, when available, requires at least one matching identity signal from:
+
+- `host.name`
+- `user.name`
+- `process.name`
+- `process.executable`
+- `source.ip`
+- `destination.ip`
+
+This is evidence collection for investigation context. It is not an attribution engine and does not automatically determine case disposition.
