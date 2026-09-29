@@ -116,6 +116,21 @@ socmind alert-orchestrate elastic alerts.ndjson \
 
 The correlation decision is deterministic, configurable, concurrency-safe, and records the exact reasons each alert was attached to a case.
 
+### Milestone 2 — Live Evidence Collector
+
+Once alerts are linked to a case, SOCMind can derive the case context and pull surrounding telemetry directly from Elastic or Wazuh Indexer:
+
+```bash
+export ELASTIC_API_KEY='...'
+
+socmind case-collect-evidence INC-2026-001 \
+  elastic https://elastic.internal:9200 'logs-*' \
+  --database socmind.db \
+  --evidence-dir evidence
+```
+
+The pull is journaled with its provider, index, query, time window, status and event count. Results are normalized and merged into the case evidence package, and collection history is visible in the Case Workspace.
+
 Detailed guide: [Production SOC Operations](docs/production-soc-operations.md)
 
 ## v1.5 Enterprise Foundation
