@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .case_workflow import ALLOWED, CaseState
+from .case_workflow import ALLOWED, CLOSED_STATES, PAUSED_STATES, CaseState
 from .sla import evaluate_sla
 
 
@@ -23,6 +23,8 @@ class CommandCase:
     title: str | None = None
     acknowledged_at: str | None = None
     evidence_path: str | None = None
+    sla_paused_at: str | None = None
+    sla_paused_seconds: int = 0
 
 
 SCHEMA = """
@@ -36,7 +38,9 @@ CREATE TABLE IF NOT EXISTS cases (
     source TEXT,
     title TEXT,
     acknowledged_at TEXT,
-    evidence_path TEXT
+    evidence_path TEXT,
+    sla_paused_at TEXT,
+    sla_paused_seconds INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS case_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,6 +149,8 @@ def connect(path: str | Path) -> sqlite3.Connection:
     for name, sql_type in {
         "acknowledged_at": "TEXT",
         "evidence_path": "TEXT",
+        "sla_paused_at": "TEXT",
+        "sla_paused_seconds": "INTEGER NOT NULL DEFAULT 0",
     }.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE cases ADD COLUMN {name} {sql_type}")
@@ -166,9 +172,10 @@ def upsert_case(
             """
             INSERT INTO cases(
               case_id,state,priority,owner,opened_at,updated_at,
-              source,title,acknowledged_at,evidence_path
+              source,title,acknowledged_at,evidence_path,
+              sla_paused_at,sla_paused_seconds
             )
-            VALUES(?,?,?,?,?,?,?,?,NULL,?)
+            VALUES(?,?,?,?,?,?,?,?,NULL,?,?,?)
             ON CONFLICT(case_id) DO UPDATE SET
               state=excluded.state,
               priority=excluded.priority,
@@ -176,11 +183,14 @@ def upsert_case(
               updated_at=excluded.updated_at,
               source=COALESCE(excluded.source,cases.source),
               title=COALESCE(excluded.title,cases.title),
-              evidence_path=COALESCE(excluded.evidence_path,cases.evidence_path)
+              evidence_path=COALESCE(excluded.evidence_path,cases.evidence_path),
+              sla_paused_at=excluded.sla_paused_at,
+              sla_paused_seconds=excluded.sla_paused_seconds
             """,
             (
                 case.case_id, case.state, case.priority, case.owner,
                 case.opened_at, case.updated_at, source, title, evidence,
+                case.sla_paused_at, max(0, int(case.sla_paused_seconds)),
             ),
         )
         conn.commit()
@@ -242,9 +252,32 @@ def transition_case(db_path: str | Path, case_id: str, target: str, *, actor: st
         current = row["state"]
         if target not in ALLOWED.get(current, set()):
             raise ValueError(f"Invalid transition: {current} -> {target}")
+
+        paused_at = row["sla_paused_at"]
+        paused_seconds = max(0, int(row["sla_paused_seconds"] or 0))
+        was_paused = current in PAUSED_STATES
+        will_pause = target in PAUSED_STATES
+
+        if was_paused and not will_pause:
+            if paused_at:
+                started = datetime.fromisoformat(str(paused_at).replace("Z", "+00:00"))
+                paused_seconds += max(
+                    0,
+                    int((datetime.fromisoformat(now) - started).total_seconds()),
+                )
+            paused_at = None
+        elif not was_paused and will_pause:
+            paused_at = now
+        elif was_paused and will_pause and not paused_at:
+            paused_at = now
+
         conn.execute(
-            "UPDATE cases SET state=?, updated_at=? WHERE case_id=?",
-            (target, now, case_id),
+            """
+            UPDATE cases
+            SET state=?, updated_at=?, sla_paused_at=?, sla_paused_seconds=?
+            WHERE case_id=?
+            """,
+            (target, now, paused_at, paused_seconds, case_id),
         )
         conn.execute(
             "INSERT INTO case_audit(case_id,actor,action,detail,timestamp) VALUES(?,?,?,?,?)",
@@ -393,10 +426,15 @@ def command_center_snapshot(
 ) -> dict:
     all_cases = list_cases(db_path)
     cases = list_cases(db_path, query=query, priority=priority, state=state, owner=owner)
-    active_all = [c for c in all_cases if c.state not in {"resolved", "false-positive"}]
+    active_all = [c for c in all_cases if c.state not in CLOSED_STATES]
     breached = []
     for case in active_all:
-        status = evaluate_sla(case.opened_at, priority=case.priority)
+        status = evaluate_sla(
+            case.opened_at,
+            priority=case.priority,
+            paused_seconds=case.sla_paused_seconds,
+            paused_at=case.sla_paused_at,
+        )
         if status.breached:
             breached.append(case.case_id)
 
@@ -419,9 +457,14 @@ def command_center_snapshot(
         closed = datetime.fromisoformat(case.updated_at.replace("Z", "+00:00"))
         mttr_values.append(max(0, int((closed - opened).total_seconds() // 60)))
 
-    active_filtered = [c for c in cases if c.state not in {"resolved", "false-positive"}]
+    active_filtered = [c for c in cases if c.state not in CLOSED_STATES]
     sla_by_case = {
-        c.case_id: evaluate_sla(c.opened_at, priority=c.priority)
+        c.case_id: evaluate_sla(
+            c.opened_at,
+            priority=c.priority,
+            paused_seconds=c.sla_paused_seconds,
+            paused_at=c.sla_paused_at,
+        )
         for c in active_filtered
     }
 
@@ -458,6 +501,8 @@ def command_center_snapshot(
                 "sla": {
                     "breached": sla_by_case[c.case_id].breached,
                     "remaining_minutes": sla_by_case[c.case_id].remaining_minutes,
+                    "paused": sla_by_case[c.case_id].paused,
+                    "paused_minutes": sla_by_case[c.case_id].paused_minutes,
                 } if c.case_id in sla_by_case else None,
             }
             for c in cases
