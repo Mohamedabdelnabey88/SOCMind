@@ -12,7 +12,12 @@
 - per-case evidence file locking
 - PostgreSQL alert/case-correlation schema
 - Alert Chain in web case detail with exact correlation reasons
-- CLI workflow: `socmind alert-orchestrate`
+- CLI workflows: `socmind alert-orchestrate` and `socmind alert-live`
+- live Elastic Security alert pull through the alert index search API
+- live Wazuh Indexer alert pull through `wazuh-alerts*`
+- current Elastic Security `kibana.alert.*` severity/risk/rule metadata support
+- Wazuh MITRE metadata promotion
+- provider-isolated credentials and provider-specific timestamp sorting
 - CI coverage across Windows, Ubuntu, Kali, packaged wheel and PostgreSQL 16
 
 
