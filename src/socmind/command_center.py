@@ -265,11 +265,21 @@ def assign_case(db_path: str | Path, case_id: str, owner: str, *, actor: str = "
         conn.commit()
 
 
-def transition_case(db_path: str | Path, case_id: str, target: str, *, actor: str = "analyst") -> None:
+def transition_case(
+    db_path: str | Path,
+    case_id: str,
+    target: str,
+    *,
+    actor: str = "analyst",
+    reason: str | None = None,
+) -> None:
     now = datetime.now(timezone.utc).isoformat()
     actor = actor.strip() or "analyst"
     if len(actor) > 120:
         raise ValueError("Actor must be 120 characters or fewer")
+    clean_reason = str(reason or "").strip()
+    if len(clean_reason) > 1000:
+        raise ValueError("Transition reason must be 1000 characters or fewer")
     with connect(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = _require_case(conn, case_id)
@@ -303,9 +313,12 @@ def transition_case(db_path: str | Path, case_id: str, target: str, *, actor: st
             """,
             (target, now, paused_at, paused_seconds, case_id),
         )
+        detail = f"{current} -> {target}"
+        if clean_reason:
+            detail += f" | reason: {clean_reason}"
         conn.execute(
             "INSERT INTO case_audit(case_id,actor,action,detail,timestamp) VALUES(?,?,?,?,?)",
-            (case_id, actor, "state-transition", f"{current} -> {target}", now),
+            (case_id, actor, "state-transition", detail, now),
         )
         conn.commit()
 
@@ -360,6 +373,10 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
                 (case_id,),
             ).fetchall()
         ]
+        state_history = [
+            item for item in audit
+            if item.get("action") == "state-transition"
+        ]
         alerts = [
             dict(row)
             for row in conn.execute(
@@ -413,6 +430,7 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
         "case": case,
         "notes": notes,
         "audit": audit,
+        "state_history": state_history,
         "alerts": alerts,
         "evidence_collections": collections,
         "evidence_requirements": requirements,
