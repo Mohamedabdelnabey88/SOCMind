@@ -81,6 +81,27 @@ def test_waiting_state_pauses_sla_and_resume_accumulates_pause(tmp_path):
     assert item["sla"]["paused_minutes"] >= 9
 
 
+def test_state_history_records_actor_timestamp_and_reason(tmp_path):
+    db = tmp_path / "soc.db"
+    upsert_case(db, make_case("INC-HISTORY", "P2", "new", "alice"))
+
+    transition_case(
+        db,
+        "INC-HISTORY",
+        "triage",
+        actor="alice",
+        reason="Initial validation started",
+    )
+
+    from socmind.command_center import case_detail
+    detail = case_detail(db, "INC-HISTORY")
+    history = detail["state_history"]
+    assert len(history) == 1
+    assert history[0]["actor"] == "alice"
+    assert history[0]["timestamp"]
+    assert "Initial validation started" in history[0]["detail"]
+
+
 def test_connect_migrates_existing_sqlite_cases_table(tmp_path):
     db = tmp_path / "legacy.db"
     with sqlite3.connect(db) as conn:
