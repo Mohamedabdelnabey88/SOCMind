@@ -114,7 +114,19 @@ socmind alert-orchestrate elastic alerts.ndjson \
   --evidence-dir /var/lib/socmind/evidence
 ```
 
-The correlation decision is deterministic, configurable, concurrency-safe, and records the exact reasons each alert was attached to a case.
+Live pull is also available without an intermediate export:
+
+```bash
+socmind alert-live elastic https://elastic:9200 \
+  .alerts-security.alerts-default \
+  --database socmind.db --json
+
+socmind alert-live wazuh-indexer https://wazuh-indexer:9200 \
+  'wazuh-alerts*' \
+  --database socmind.db --json
+```
+
+The same orchestration core is used for file and live ingestion. The correlation decision is deterministic, configurable, concurrency-safe, and records the exact reasons each alert was attached to a case.
 
 Detailed guide: [Production SOC Operations](docs/production-soc-operations.md)
 
