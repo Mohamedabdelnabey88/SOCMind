@@ -30,3 +30,5 @@ flowchart LR
 4. **Cross-platform first** — Windows and Linux are tested in CI.
 5. **Safe portfolio datasets** — sample data uses documentation-only IP ranges and no live credentials or malware.
 6. **Composable adapters** — future SIEM, EDR, auditd, Sigma, MISP, and threat-intel integrations can feed the same model.
+7. **Missing evidence is an operational dependency, not a contradiction** — validation gaps can become permission-controlled Evidence Requirements with explicit lifecycle and audit history.
+8. **Case state changes are auditable facts** — persistent case stores expose structured transition history derived from the append-only case audit trail.
