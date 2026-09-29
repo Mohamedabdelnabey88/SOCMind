@@ -82,6 +82,22 @@ CREATE TABLE IF NOT EXISTS case_alerts (
     FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE,
     FOREIGN KEY(alert_id) REFERENCES alerts(alert_id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS evidence_requests (
+    request_id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    description TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    owner TEXT,
+    priority TEXT NOT NULL,
+    status TEXT NOT NULL,
+    due_at TEXT,
+    resolution_note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT,
+    FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS evidence_collections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     collection_id TEXT NOT NULL UNIQUE,
@@ -114,6 +130,8 @@ CREATE INDEX IF NOT EXISTS idx_alerts_rule_time ON alerts(rule_id COLLATE NOCASE
 CREATE INDEX IF NOT EXISTS idx_alerts_technique_time ON alerts(technique COLLATE NOCASE,timestamp);
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_collections_case ON evidence_collections(case_id,started_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requests_case ON evidence_requests(case_id,status,due_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requests_owner ON evidence_requests(owner,status);
 """
 
 
