@@ -44,6 +44,43 @@ socmind alert-orchestrate elastic elastic-alerts.ndjson \
   --json
 ```
 
+## Live alert ingestion
+
+SOCMind can pull active alerts directly from an Elasticsearch-compatible search API and immediately feed them into the same idempotent orchestration pipeline used by file ingestion.
+
+### Elastic Security
+
+```bash
+export ELASTIC_API_KEY='...'
+
+socmind alert-live elastic https://elastic.internal:9200 \
+  .alerts-security.alerts-default \
+  --database socmind.db \
+  --evidence-dir socmind-evidence \
+  --json
+```
+
+The parser understands current Elastic Security alert metadata including `kibana.alert.rule.*`, `kibana.alert.severity`, `kibana.alert.risk_score`, and ATT&CK technique metadata.
+
+### Wazuh Indexer
+
+```bash
+export WAZUH_INDEXER_USER='...'
+export WAZUH_INDEXER_PASSWORD='...'
+
+socmind alert-live wazuh-indexer https://wazuh-indexer.internal:9200 \
+  'wazuh-alerts*' \
+  --database socmind.db \
+  --evidence-dir socmind-evidence \
+  --json
+```
+
+`WAZUH_INDEXER_JWT` is also supported. Wazuh Indexer credentials are isolated from Elastic credentials.
+
+The live command requires no temporary export file. Returned search hits are normalized in memory and passed directly through duplicate detection, explainable correlation, case creation/attachment, priority escalation and evidence-window collection.
+
+TLS verification is enabled by default. `--insecure` is intended only for controlled lab environments.
+
 ## Correlation model
 
 SOCMind currently scores explainable alert overlap using:
