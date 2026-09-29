@@ -15,6 +15,15 @@ from .dashboard import build_dashboard_payload
 from .detection_replay import detection_replay_payload
 from .detections import load_rules
 from .enterprise_auth import AuthConfig, authenticate
+from .evidence_requests import (
+    create_request_pg,
+    create_request_sqlite,
+    ensure_suggested_requests_pg,
+    ensure_suggested_requests_sqlite,
+    suggestion_payload,
+    update_request_pg,
+    update_request_sqlite,
+)
 from .enterprise_command_center import (
     acknowledge_case_pg,
     add_case_note_pg,
@@ -71,6 +80,29 @@ def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
             "title": audit.get("action") or "Case action",
             "detail": f"{audit.get('actor') or 'unknown'} · {audit.get('detail') or ''}",
         })
+
+    for request in detail.get("evidence_requests") or []:
+        items.append({
+            "timestamp": request.get("created_at"),
+            "kind": "evidence-request",
+            "title": request.get("title") or "Evidence request",
+            "detail": (
+                f"{request.get('status') or 'pending'} · "
+                f"{request.get('source') or 'unknown source'} · "
+                f"{request.get('assigned_to') or 'unassigned'}"
+            ),
+        })
+        if request.get("fulfilled_at"):
+            items.append({
+                "timestamp": request.get("fulfilled_at"),
+                "kind": "evidence-fulfilled",
+                "title": request.get("title") or "Evidence fulfilled",
+                "detail": (
+                    request.get("response_summary")
+                    or request.get("evidence_reference")
+                    or "Evidence request fulfilled"
+                ),
+            })
 
     if investigation and not investigation.get("error"):
         for event in investigation.get("timeline") or []:
@@ -262,6 +294,75 @@ def create_app(
             disposition=disposition,
         )
 
+    def store_create_evidence_request(
+        case_id: str,
+        *,
+        user: Principal,
+        key: str,
+        title: str,
+        source: str,
+        target_value: str | None,
+        rationale: str,
+        assigned_to: str | None,
+        due_hours: int | None,
+    ) -> str:
+        kind, target = require_store()
+        kwargs = dict(
+            case_id=case_id,
+            key=key,
+            title=title,
+            source=source,
+            target=target_value,
+            rationale=rationale,
+            requested_by=user.subject,
+            assigned_to=assigned_to,
+            due_hours=due_hours,
+        )
+        if kind == "postgres":
+            return create_request_pg(target, **kwargs)
+        return create_request_sqlite(target, **kwargs)
+
+    def store_suggest_evidence_requests(
+        case_id: str,
+        events,
+        *,
+        user: Principal,
+        assigned_to: str | None,
+        due_hours: int | None,
+    ) -> list[str]:
+        kind, target = require_store()
+        kwargs = dict(
+            case_id=case_id,
+            events=events,
+            requested_by=user.subject,
+            assigned_to=assigned_to,
+            due_hours=due_hours,
+        )
+        if kind == "postgres":
+            return ensure_suggested_requests_pg(target, **kwargs)
+        return ensure_suggested_requests_sqlite(target, **kwargs)
+
+    def store_update_evidence_request(
+        request_id: str,
+        *,
+        user: Principal,
+        status: str,
+        response_summary: str | None,
+        evidence_reference: str | None,
+        assigned_to: str | None,
+    ) -> str:
+        kind, target = require_store()
+        kwargs = dict(
+            status=status,
+            actor=user.subject,
+            response_summary=response_summary,
+            evidence_reference=evidence_reference,
+            assigned_to=assigned_to,
+        )
+        if kind == "postgres":
+            return update_request_pg(target, request_id, **kwargs)
+        return update_request_sqlite(target, request_id, **kwargs)
+
     def enterprise_audit(
         *,
         case_id: str,
@@ -437,6 +538,142 @@ def create_app(
                 detail=text[:200],
             )
             return {"note_id": note_id, **store_detail(target_case_id)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/cases/{target_case_id}/evidence-suggestions")
+    def evidence_suggestions(
+        target_case_id: str,
+        user: Principal = Depends(allowed("case.read")),
+    ):
+        try:
+            detail = store_detail(target_case_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        evidence_path = detail["case"].get("evidence_path")
+        if not evidence_path or not Path(evidence_path).is_file():
+            return {"enabled": False, "count": 0, "suggestions": []}
+        try:
+            return {"enabled": True, **suggestion_payload(load_jsonl(evidence_path))}
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/cases/{target_case_id}/evidence-requests")
+    def create_evidence_request_endpoint(
+        target_case_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(allowed("case.evidence_request")),
+    ):
+        try:
+            request_id = store_create_evidence_request(
+                target_case_id,
+                user=user,
+                key=str(request.get("key", "")).strip(),
+                title=str(request.get("title", "")).strip(),
+                source=str(request.get("source", "")).strip(),
+                target_value=(
+                    str(request.get("target")).strip()
+                    if request.get("target") is not None
+                    else None
+                ),
+                rationale=str(request.get("rationale", "")).strip(),
+                assigned_to=(
+                    str(request.get("assigned_to")).strip()
+                    if request.get("assigned_to")
+                    else None
+                ),
+                due_hours=(
+                    int(request["due_hours"])
+                    if request.get("due_hours") is not None
+                    else 4
+                ),
+            )
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action="evidence-request.create",
+                detail=f"Created evidence request {request_id}",
+            )
+            return {"request_id": request_id, **store_detail(target_case_id)}
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/cases/{target_case_id}/evidence-requests/suggest")
+    def suggest_evidence_requests_endpoint(
+        target_case_id: str,
+        request: dict = Body(default={}),
+        user: Principal = Depends(allowed("case.evidence_request")),
+    ):
+        try:
+            detail = store_detail(target_case_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        evidence_path = detail["case"].get("evidence_path")
+        if not evidence_path or not Path(evidence_path).is_file():
+            raise HTTPException(status_code=409, detail="Case has no readable evidence file")
+        try:
+            request_ids = store_suggest_evidence_requests(
+                target_case_id,
+                load_jsonl(evidence_path),
+                user=user,
+                assigned_to=(
+                    str(request.get("assigned_to")).strip()
+                    if request.get("assigned_to")
+                    else None
+                ),
+                due_hours=(
+                    int(request["due_hours"])
+                    if request.get("due_hours") is not None
+                    else 4
+                ),
+            )
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action="evidence-request.suggest",
+                detail=f"Ensured {len(request_ids)} suggested evidence request(s)",
+            )
+            return {
+                "request_ids": request_ids,
+                **store_detail(target_case_id),
+            }
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/evidence-requests/{request_id}")
+    def update_evidence_request_endpoint(
+        request_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(allowed("case.evidence_request")),
+    ):
+        try:
+            case_id = store_update_evidence_request(
+                request_id,
+                user=user,
+                status=str(request.get("status", "")).strip(),
+                response_summary=(
+                    str(request.get("response_summary")).strip()
+                    if request.get("response_summary")
+                    else None
+                ),
+                evidence_reference=(
+                    str(request.get("evidence_reference")).strip()
+                    if request.get("evidence_reference")
+                    else None
+                ),
+                assigned_to=(
+                    str(request.get("assigned_to")).strip()
+                    if request.get("assigned_to")
+                    else None
+                ),
+            )
+            enterprise_audit(
+                case_id=case_id,
+                user=user,
+                action="evidence-request.update",
+                detail=f"Updated evidence request {request_id}",
+            )
+            return {"request_id": request_id, **store_detail(case_id)}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
