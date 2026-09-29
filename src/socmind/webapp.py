@@ -15,6 +15,12 @@ from .dashboard import build_dashboard_payload
 from .detection_replay import detection_replay_payload
 from .detections import load_rules
 from .enterprise_auth import AuthConfig, authenticate
+from .evidence_requests import (
+    create_evidence_request_postgres,
+    create_evidence_request_sqlite,
+    update_evidence_request_postgres,
+    update_evidence_request_sqlite,
+)
 from .enterprise_command_center import (
     acknowledge_case_pg,
     add_case_note_pg,
@@ -53,6 +59,21 @@ def _case_timeline(detail: dict, investigation: dict | None) -> list[dict]:
             "detail": (
                 f"{alert.get('source') or 'unknown'} · severity {alert.get('severity', '—')} · "
                 f"correlation {alert.get('correlation_score', 0)}"
+            ),
+        })
+
+    for request in detail.get("evidence_requests") or []:
+        items.append({
+            "timestamp": request.get("completed_at") or request.get("updated_at") or request.get("created_at"),
+            "kind": "evidence-request",
+            "title": (
+                f"Evidence request · {request.get('kind') or 'general'} · "
+                f"{request.get('status') or 'open'}"
+            ),
+            "detail": (
+                f"{request.get('priority') or 'normal'} · "
+                f"{request.get('owner') or 'unassigned'} · "
+                f"{request.get('description') or ''}"
             ),
         })
 
@@ -276,6 +297,32 @@ def create_app(
             disposition=disposition,
         )
 
+    def store_create_evidence_request(case_id: str, user: Principal, request: dict):
+        kind, target = require_store()
+        kwargs = {
+            "kind": str(request.get("kind", "")),
+            "description": str(request.get("description", "")),
+            "requested_by": user.subject,
+            "owner": request.get("owner"),
+            "priority": str(request.get("priority", "normal")),
+            "due_at": request.get("due_at"),
+        }
+        if kind == "postgres":
+            return create_evidence_request_postgres(target, case_id, **kwargs)
+        return create_evidence_request_sqlite(target, case_id, **kwargs)
+
+    def store_update_evidence_request(request_id: str, user: Principal, request: dict):
+        kind, target = require_store()
+        kwargs = {
+            "actor": user.subject,
+            "status": str(request.get("status", "")),
+            "owner": request.get("owner"),
+            "resolution_note": request.get("resolution_note"),
+        }
+        if kind == "postgres":
+            return update_evidence_request_postgres(target, request_id, **kwargs)
+        return update_evidence_request_sqlite(target, request_id, **kwargs)
+
     def enterprise_audit(
         *,
         case_id: str,
@@ -451,6 +498,42 @@ def create_app(
                 detail=text[:200],
             )
             return {"note_id": note_id, **store_detail(target_case_id)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/cases/{target_case_id}/evidence-requests")
+    def create_evidence_request_endpoint(
+        target_case_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(allowed("case.evidence_request")),
+    ):
+        try:
+            item = store_create_evidence_request(target_case_id, user, request)
+            enterprise_audit(
+                case_id=target_case_id,
+                user=user,
+                action="case.evidence-request.create",
+                detail=f"{item.request_id} · {item.kind}",
+            )
+            return store_detail(target_case_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/evidence-requests/{request_id}")
+    def update_evidence_request_endpoint(
+        request_id: str,
+        request: dict = Body(...),
+        user: Principal = Depends(allowed("case.evidence_request")),
+    ):
+        try:
+            item = store_update_evidence_request(request_id, user, request)
+            enterprise_audit(
+                case_id=item.case_id,
+                user=user,
+                action="case.evidence-request.update",
+                detail=f"{item.request_id} · {item.status}",
+            )
+            return store_detail(item.case_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
