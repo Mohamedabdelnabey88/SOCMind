@@ -315,30 +315,47 @@ def verify_id_token(
         str(discovery["jwks_uri"]),
         allow_insecure_http=config.allow_insecure_http,
     )
-    header = jwt.get_unverified_header(id_token)
-    algorithm = str(header.get("alg") or "")
-    if algorithm not in ALLOWED_ID_TOKEN_ALGORITHMS:
-        raise PermissionError(f"Unsupported OIDC ID-token algorithm: {algorithm}")
+    try:
+        header = jwt.get_unverified_header(id_token)
+        algorithm = str(header.get("alg") or "")
+        if algorithm not in ALLOWED_ID_TOKEN_ALGORITHMS:
+            raise PermissionError(
+                f"Unsupported OIDC ID-token algorithm: {algorithm}"
+            )
 
-    jwk_client = jwt.PyJWKClient(jwks_uri, cache_keys=True)
-    signing_key = jwk_client.get_signing_key_from_jwt(id_token)
-    claims = jwt.decode(
-        id_token,
-        signing_key.key,
-        algorithms=[algorithm],
-        audience=config.client_id,
-        issuer=normalize_issuer(
-            config.issuer,
-            allow_insecure_http=config.allow_insecure_http,
-        ),
-        options={
-            "require": ["exp", "iat", "iss", "sub"],
-            "verify_signature": True,
-            "verify_exp": True,
-            "verify_aud": True,
-            "verify_iss": True,
-        },
-    )
+        jwk_client = jwt.PyJWKClient(jwks_uri, cache_keys=True)
+        signing_key = jwk_client.get_signing_key_from_jwt(id_token)
+        claims = jwt.decode(
+            id_token,
+            signing_key.key,
+            algorithms=[algorithm],
+            audience=config.client_id,
+            issuer=normalize_issuer(
+                config.issuer,
+                allow_insecure_http=config.allow_insecure_http,
+            ),
+            options={
+                "require": ["exp", "iat", "iss", "sub"],
+                "verify_signature": True,
+                "verify_exp": True,
+                "verify_aud": True,
+                "verify_iss": True,
+            },
+        )
+    except PermissionError:
+        raise
+    except jwt.PyJWTError as exc:
+        raise PermissionError(f"OIDC ID-token validation failed: {exc}") from exc
+
+    audience = claims.get("aud")
+    if isinstance(audience, list) and len(audience) > 1:
+        if not secrets.compare_digest(
+            str(claims.get("azp") or ""),
+            str(config.client_id),
+        ):
+            raise PermissionError(
+                "OIDC authorized-party claim does not match client ID"
+            )
     if not secrets.compare_digest(str(claims.get("nonce") or ""), str(nonce)):
         raise PermissionError("OIDC nonce validation failed")
     return dict(claims)
