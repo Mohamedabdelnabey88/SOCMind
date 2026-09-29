@@ -98,6 +98,15 @@ async function openCase(caseId){
     const technique=a.technique?(' · '+esc(a.technique)):"";
     return '<div><b>'+esc(a.alert_id)+' · '+esc(a.source)+'</b><span>'+esc(a.timestamp)+' · severity '+esc(a.severity)+' · correlation '+esc(a.correlation_score)+rule+technique+'</span><p>'+esc(a.title)+'</p>'+(reasons?'<ul>'+reasons+'</ul>':'<p class="score">Root alert / no correlation reason required.</p>')+'</div>';
   }).join("")||"<div>No orchestrated alerts linked to this case.</div>";
+  q("#caseEvidenceRequests").innerHTML=(data.evidence_requests||[]).map(item=>{
+    const due=item.due_at?(' · due '+esc(item.due_at)):"";
+    const owner=item.owner?(' · '+esc(item.owner)):" · unassigned";
+    const actions=(item.status==="open"||item.status==="in-progress")
+      ? '<div class="chips"><button class="evidence-request-action" data-request="'+esc(item.request_id)+'" data-status="in-progress">In Progress</button><button class="evidence-request-action" data-request="'+esc(item.request_id)+'" data-status="fulfilled">Fulfill</button><button class="evidence-request-action" data-request="'+esc(item.request_id)+'" data-status="cancelled">Cancel</button></div>'
+      : "";
+    return '<div><b>'+esc(item.kind)+' · '+esc(item.priority)+' · '+esc(item.status)+'</b><span>'+esc(item.request_id)+owner+due+'</span><p>'+esc(item.description)+'</p>'+(item.resolution_note?'<p class="score">'+esc(item.resolution_note)+'</p>':'')+actions+'</div>';
+  }).join("")||"<div>No evidence requests for this case.</div>";
+  qa(".evidence-request-action").forEach(btn=>btn.addEventListener("click",()=>updateEvidenceRequest(btn.dataset.request,btn.dataset.status)));
   q("#caseEvidenceCollections").innerHTML=(data.evidence_collections||[]).map(item=>{
     const status=item.status==="completed"?"✓ completed":"⚠ "+esc(item.status||"unknown");
     const total=item.total_hits==null?"unknown":item.total_hits;
@@ -125,6 +134,33 @@ q("#ackCase").addEventListener("click",()=>mutateCase("/acknowledge"));
 q("#assignCase").addEventListener("click",()=>{const owner=q("#assignOwner").value.trim();if(owner)mutateCase("/assign",{owner});});
 q("#transitionCase").addEventListener("click",()=>{const state=q("#transitionState").value;if(state)mutateCase("/transition",{state});});
 q("#addNote").addEventListener("click",()=>{const text=q("#noteText").value.trim();if(!text)return;mutateCase("/notes",{text}).then(()=>q("#noteText").value="");});
+
+q("#createEvidenceRequest").addEventListener("click",async()=>{
+  if(!currentCaseId)return;
+  const kind=q("#evidenceRequestKind").value.trim();
+  const description=q("#evidenceRequestDescription").value.trim();
+  if(!kind||!description)return;
+  const due=q("#evidenceRequestDue").value;
+  const body={
+    kind,
+    description,
+    owner:q("#evidenceRequestOwner").value.trim()||null,
+    priority:q("#evidenceRequestPriority").value,
+    due_at:due?new Date(due).toISOString():null
+  };
+  const res=await apiFetch("/api/cases/"+encodeURIComponent(currentCaseId)+"/evidence-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!res.ok){const e=await res.json().catch(()=>({detail:"Request failed"}));alert(e.detail||"Request failed");return;}
+  q("#evidenceRequestKind").value="";q("#evidenceRequestDescription").value="";q("#evidenceRequestOwner").value="";q("#evidenceRequestDue").value="";
+  await openCase(currentCaseId);await loadCommandCenter();
+});
+
+async function updateEvidenceRequest(requestId,status){
+  const note=status==="fulfilled"?prompt("Resolution note (optional)"):"";
+  const res=await apiFetch("/api/evidence-requests/"+encodeURIComponent(requestId),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,resolution_note:note||null})});
+  if(!res.ok){const e=await res.json().catch(()=>({detail:"Request failed"}));alert(e.detail||"Request failed");return;}
+  if(currentCaseId)await openCase(currentCaseId);
+  await loadCommandCenter();
+}
 
 async function loadLeadHealth(){
   try{
