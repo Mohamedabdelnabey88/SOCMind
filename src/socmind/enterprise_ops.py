@@ -132,6 +132,22 @@ CREATE TABLE IF NOT EXISTS case_alerts (
   PRIMARY KEY(case_id, alert_id)
 );
 
+CREATE TABLE IF NOT EXISTS evidence_requests (
+  request_id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  description TEXT NOT NULL,
+  requested_by TEXT NOT NULL,
+  owner TEXT,
+  priority TEXT NOT NULL,
+  status TEXT NOT NULL,
+  due_at TIMESTAMPTZ,
+  resolution_note TEXT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS evidence_collections (
   id BIGSERIAL PRIMARY KEY,
   collection_id TEXT NOT NULL UNIQUE,
@@ -164,4 +180,6 @@ CREATE INDEX IF NOT EXISTS idx_alerts_rule_time ON alerts(LOWER(rule_id), timest
 CREATE INDEX IF NOT EXISTS idx_alerts_technique_time ON alerts(LOWER(technique), timestamp);
 CREATE INDEX IF NOT EXISTS idx_case_alerts_alert ON case_alerts(alert_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_collections_case ON evidence_collections(case_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requests_case ON evidence_requests(case_id, status, due_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_requests_owner ON evidence_requests(owner, status);
 """
