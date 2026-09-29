@@ -226,6 +226,19 @@ Outcomes:
 - CORRELATED: alert was linked to an existing active case with explainable reasons
 - DUPLICATE: the same source alert ID was already ingested
 
+Live alert ingestion:
+  socmind alert-live elastic https://elastic:9200 .alerts-security.alerts-default \
+    --database socmind.db --json
+
+  export WAZUH_INDEXER_USER='...'
+  export WAZUH_INDEXER_PASSWORD='...'
+  socmind alert-live wazuh-indexer https://wazuh-indexer:9200 'wazuh-alerts*' \
+    --database socmind.db --json
+
+Elastic uses ELASTIC_API_KEY / ELASTIC_BEARER_TOKEN / ELASTIC_USER+PASSWORD.
+Wazuh Indexer uses WAZUH_INDEXER_JWT or WAZUH_INDEXER_USER+PASSWORD.
+TLS verification is enabled by default.
+
 Correlation is deterministic and auditable. It does not claim attacker attribution.
 
 Collect live case evidence from Elastic:
