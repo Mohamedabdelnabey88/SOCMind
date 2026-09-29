@@ -227,6 +227,23 @@ Outcomes:
 - DUPLICATE: the same source alert ID was already ingested
 
 Correlation is deterministic and auditable. It does not claim attacker attribution.
+
+Collect live case evidence from Elastic:
+  export ELASTIC_API_KEY='...'
+  socmind case-collect-evidence INC-2026-001 elastic https://elastic:9200 'logs-*' \
+    --database socmind.db \
+    --evidence-dir evidence
+
+Collect from Wazuh Indexer / OpenSearch:
+  export WAZUH_INDEXER_USER='...'
+  export WAZUH_INDEXER_PASSWORD='...'
+  socmind case-collect-evidence INC-2026-001 wazuh-indexer https://indexer:9200 'wazuh-alerts-*' \
+    --database socmind.db \
+    --evidence-dir evidence
+
+The collector derives its time window and identity context from the case's linked alerts,
+merges normalized events into the case evidence package, and journals every collection.
+TLS verification is enabled by default.
 """,
     "demo": """SOCMind Portfolio Demo
 
