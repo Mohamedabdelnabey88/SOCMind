@@ -279,11 +279,24 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
         row["timestamp"] = _iso(row.get("timestamp"))
         row["created_at"] = _iso(row.get("created_at"))
         row["linked_at"] = _iso(row.get("linked_at"))
+
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM evidence_requests WHERE case_id=%s ORDER BY created_at",
+                (case_id,),
+            )
+            evidence_requests = cur.fetchall()
+    for row in evidence_requests:
+        for key in ("due_at", "created_at", "updated_at", "fulfilled_at"):
+            row[key] = _iso(row.get(key))
+
     return {
         "case": case_payload,
         "notes": notes,
         "audit": audit,
         "alerts": alerts,
+        "evidence_requests": evidence_requests,
     }
 
 
