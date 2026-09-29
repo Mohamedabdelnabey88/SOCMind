@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS evidence_collections (
     query_json TEXT NOT NULL,
     status TEXT NOT NULL,
     event_count INTEGER NOT NULL DEFAULT 0,
+    total_hits INTEGER,
+    truncated INTEGER NOT NULL DEFAULT 0,
     error TEXT,
     started_at TEXT NOT NULL,
     completed_at TEXT,
