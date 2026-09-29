@@ -105,7 +105,8 @@ def build_unified_case_timeline(
             detail=(
                 f"{alert.get('title') or alert_id or 'Alert'} · "
                 f"severity {alert.get('severity', '—')} · "
-                f"priority {alert.get('priority', '—')}"
+                f"priority {alert.get('priority', '—')} · "
+                f"correlation {alert.get('correlation_score', 0)}"
             ),
             title=alert.get("title") or alert_id or "Alert received",
             kind="alert",
