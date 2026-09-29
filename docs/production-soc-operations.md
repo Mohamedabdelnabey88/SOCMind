@@ -44,6 +44,39 @@ socmind alert-orchestrate elastic elastic-alerts.ndjson \
   --json
 ```
 
+## Live alert pull
+
+Elastic Security alert alias:
+
+```bash
+export ELASTIC_API_KEY='...'
+
+socmind alert-live elastic https://elastic:9200 \
+  .alerts-security.alerts-default \
+  --database socmind.db \
+  --evidence-dir socmind-evidence \
+  --json
+```
+
+Wazuh Indexer:
+
+```bash
+export WAZUH_INDEXER_USERNAME='...'
+export WAZUH_INDEXER_PASSWORD='...'
+
+socmind alert-live wazuh-indexer https://wazuh-indexer:9200 \
+  'wazuh-alerts*' \
+  --database socmind.db \
+  --evidence-dir socmind-evidence \
+  --json
+```
+
+JWT is also supported through `WAZUH_INDEXER_JWT`.
+
+The live path queries the search API and feeds returned hits directly into the same duplicate/correlation/case/evidence pipeline used by file orchestration. No temporary export file is required.
+
+TLS certificate verification is enabled by default. `--insecure` is intended only for controlled lab systems with self-signed certificates.
+
 ## Correlation model
 
 SOCMind currently scores explainable alert overlap using:
