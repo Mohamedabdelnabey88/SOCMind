@@ -15,6 +15,7 @@ from .dashboard import build_dashboard_payload
 from .detection_replay import detection_replay_payload
 from .detections import load_rules
 from .enterprise_auth import AuthConfig, authenticate
+from .evidence_integrity import evidence_manifest_path, verification_payload, verify_evidence_manifest
 from .enterprise_command_center import (
     acknowledge_case_pg,
     add_case_note_pg,
@@ -240,6 +241,40 @@ def create_app(
             return case_detail_pg(target, case_id)
         return case_detail(target, case_id)
 
+    def evidence_integrity_for_detail(detail: dict) -> dict:
+        evidence_value = (detail.get("case") or {}).get("evidence_path")
+        if not evidence_value:
+            return {"available": False, "valid": None, "reason": "no-evidence"}
+        evidence_path = Path(evidence_value)
+        if not evidence_path.is_file():
+            return {
+                "available": False,
+                "valid": False,
+                "reason": "evidence-missing",
+                "evidence_path": str(evidence_path),
+            }
+        manifest_path = evidence_manifest_path(evidence_path)
+        if not manifest_path.is_file():
+            return {
+                "available": False,
+                "valid": None,
+                "reason": "manifest-missing",
+                "evidence_path": str(evidence_path),
+                "manifest_path": str(manifest_path),
+            }
+        try:
+            result = verify_evidence_manifest(evidence_path, manifest_path)
+        except (OSError, ValueError, TypeError) as exc:
+            return {
+                "available": True,
+                "valid": False,
+                "reason": "verification-error",
+                "error": str(exc),
+                "evidence_path": str(evidence_path),
+                "manifest_path": str(manifest_path),
+            }
+        return {"available": True, **verification_payload(result)}
+
     def store_ack(case_id: str, actor: str):
         kind, target = require_store()
         if kind == "postgres":
@@ -372,8 +407,20 @@ def create_app(
         return {
             **detail,
             "investigation": investigation,
+            "evidence_integrity": evidence_integrity_for_detail(detail),
             "case_timeline": _case_timeline(detail, investigation),
         }
+
+    @app.get("/api/cases/{target_case_id}/evidence-integrity")
+    def case_evidence_integrity(
+        target_case_id: str,
+        user: Principal = Depends(allowed("case.read")),
+    ):
+        try:
+            detail = store_detail(target_case_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return evidence_integrity_for_detail(detail)
 
     @app.post("/api/cases/{target_case_id}/acknowledge")
     def acknowledge(
