@@ -190,9 +190,9 @@ def create_request_sqlite(
         case = conn.execute("SELECT case_id FROM cases WHERE case_id=?", (case_id,)).fetchone()
         if case is None:
             raise ValueError(f"Unknown case: {case_id}")
-        conn.execute(
+        cur = conn.execute(
             """
-            INSERT INTO evidence_requests(
+            INSERT OR IGNORE INTO evidence_requests(
               request_id,case_id,key,title,source,target,rationale,status,
               requested_by,assigned_to,due_at,created_at,updated_at,
               fulfilled_at,response_summary,evidence_reference
@@ -204,6 +204,18 @@ def create_request_sqlite(
                 now, now, None, None, None,
             ),
         )
+        if cur.rowcount == 0:
+            existing = conn.execute(
+                """
+                SELECT request_id FROM evidence_requests
+                WHERE case_id=? AND key=? AND status IN ('pending','in-progress')
+                LIMIT 1
+                """,
+                (case_id, key),
+            ).fetchone()
+            if existing is None:
+                raise RuntimeError("Evidence request could not be created")
+            return existing["request_id"]
         conn.execute(
             """
             INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
@@ -303,6 +315,7 @@ def create_request_pg(
                   requested_by,assigned_to,due_at,created_at,updated_at,
                   fulfilled_at,response_summary,evidence_reference
                 ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT DO NOTHING
                 """,
                 (
                     request_id, case_id, key, title, source, target, rationale,
@@ -311,6 +324,20 @@ def create_request_pg(
                     now, now, None, None, None,
                 ),
             )
+            if cur.rowcount == 0:
+                cur.execute(
+                    """
+                    SELECT request_id FROM evidence_requests
+                    WHERE case_id=%s AND key=%s
+                      AND status IN ('pending','in-progress')
+                    LIMIT 1
+                    """,
+                    (case_id, key),
+                )
+                existing = cur.fetchone()
+                if existing is None:
+                    raise RuntimeError("Evidence request could not be created")
+                return existing["request_id"]
             cur.execute(
                 """
                 INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
@@ -393,3 +420,59 @@ def update_request_pg(
                 ),
             )
         conn.commit()
+
+
+def ensure_suggested_requests_sqlite(
+    db_path: str | Path,
+    *,
+    case_id: str,
+    events: list[Event],
+    requested_by: str,
+    assigned_to: str | None = None,
+    due_hours: int | None = 4,
+) -> list[str]:
+    request_ids = []
+    for suggestion in suggest_evidence_requests(events):
+        request_ids.append(
+            create_request_sqlite(
+                db_path,
+                case_id=case_id,
+                key=suggestion.key,
+                title=suggestion.title,
+                source=suggestion.source,
+                target=suggestion.target,
+                rationale=suggestion.rationale,
+                requested_by=requested_by,
+                assigned_to=assigned_to,
+                due_hours=due_hours,
+            )
+        )
+    return request_ids
+
+
+def ensure_suggested_requests_pg(
+    dsn: str,
+    *,
+    case_id: str,
+    events: list[Event],
+    requested_by: str,
+    assigned_to: str | None = None,
+    due_hours: int | None = 4,
+) -> list[str]:
+    request_ids = []
+    for suggestion in suggest_evidence_requests(events):
+        request_ids.append(
+            create_request_pg(
+                dsn,
+                case_id=case_id,
+                key=suggestion.key,
+                title=suggestion.title,
+                source=suggestion.source,
+                target=suggestion.target,
+                rationale=suggestion.rationale,
+                requested_by=requested_by,
+                assigned_to=assigned_to,
+                due_hours=due_hours,
+            )
+        )
+    return request_ids
