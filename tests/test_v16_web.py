@@ -69,6 +69,15 @@ def test_orchestrated_case_exposes_alert_chain_and_unified_timeline(tmp_path):
 
     assert len(payload["alerts"]) == 2
     assert payload["investigation"]["summary"]["events"] > 0
+    assert payload["evidence_integrity"]["available"] is True
+    assert payload["evidence_integrity"]["valid"] is True
+
+    integrity_response = client.get(
+        f"/api/cases/{first_result.case_id}/evidence-integrity"
+    )
+    assert integrity_response.status_code == 200
+    assert integrity_response.json()["valid"] is True
+
     timeline = payload["case_timeline"]
     assert timeline
 
@@ -81,6 +90,20 @@ def test_orchestrated_case_exposes_alert_chain_and_unified_timeline(tmp_path):
     alert_entries = [item for item in timeline if item["kind"] == "alert"]
     assert len(alert_entries) == 2
     assert any("correlation" in item["detail"] for item in alert_entries)
+
+    evidence_path = Path(first_result.evidence_path)
+    evidence_path.write_text(
+        evidence_path.read_text(encoding="utf-8") + '{"tampered":true}\\n',
+        encoding="utf-8",
+    )
+    tampered = client.get(
+        f"/api/cases/{first_result.case_id}/evidence-integrity"
+    )
+    assert tampered.status_code == 200
+    tampered_payload = tampered.json()
+    assert tampered_payload["available"] is True
+    assert tampered_payload["valid"] is False
+    assert "sha256 mismatch" in tampered_payload["errors"]
 
 
 def test_web_reports_v16_api_version():
