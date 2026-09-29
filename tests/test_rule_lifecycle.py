@@ -204,6 +204,87 @@ def test_version_change_requires_semver_and_change_note(tmp_path):
     )
     assert updated["version"] == "1.1.0"
     assert updated["change_notes"][-1]["note"] == "Improve command-line scope"
+    assert updated["syntax_status"]["status"] == "not-run"
+    assert updated["syntax_status"]["version"] == "1.1.0"
+    assert updated["test_status"]["status"] == "not-run"
+    assert updated["test_status"]["version"] == "1.1.0"
+
+
+def test_rule_content_change_invalidates_previous_approval_evidence(tmp_path):
+    registry = tmp_path / "rule-registry.json"
+    mutable_rule = tmp_path / "mutable-rule.yml"
+    mutable_rule.write_text(RULE.read_text(encoding="utf-8"), encoding="utf-8")
+
+    register_rule(
+        registry,
+        mutable_rule,
+        owner="detection-team",
+        actor="tier2@example.com",
+        role="senior-analyst",
+        version="1.0.0",
+    )
+    transition_rule(
+        registry,
+        RULE_ID,
+        "testing",
+        actor="tier2@example.com",
+        role="senior-analyst",
+        note="Begin validation",
+    )
+
+    validate_registered_rule_syntax(
+        registry,
+        RULE_ID,
+        actor="tier2@example.com",
+        role="senior-analyst",
+    )
+    run_registered_rule_test(
+        registry,
+        RULE_ID,
+        FIXTURE,
+        actor="tier2@example.com",
+        role="senior-analyst",
+    )
+    record_incident_replay(
+        registry,
+        RULE_ID,
+        EVENTS,
+        actor="tier2@example.com",
+        role="senior-analyst",
+        case_id="CONFIRMED-002",
+    )
+    record_false_positive_observation(
+        registry,
+        RULE_ID,
+        actor="tier2@example.com",
+        role="senior-analyst",
+        sample_size=10,
+        false_positives=0,
+        note="No false positives in validation sample",
+    )
+    record_coverage_delta(
+        registry,
+        RULE_ID,
+        actor="tier2@example.com",
+        role="senior-analyst",
+        visibility_delta=10.0,
+        newly_covered_techniques=["T1059.001"],
+    )
+
+    mutable_rule.write_text(
+        mutable_rule.read_text(encoding="utf-8") + "\n# changed after validation\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="current rule content"):
+        transition_rule(
+            registry,
+            RULE_ID,
+            "approved",
+            actor="lead@example.com",
+            role="lead",
+            note="Should fail because content changed after validation",
+        )
 
 
 def test_concurrent_false_positive_updates_do_not_lose_history(tmp_path):
