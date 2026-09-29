@@ -43,7 +43,7 @@ def parse_elastic_ndjson(path: str | Path) -> list[Event]:
                 src_ip=_dig(source, "source", "ip"),
                 dst_ip=_dig(source, "destination", "ip"),
                 command_line=_dig(source, "process", "command_line"),
-                data={"ecs": source},
+                data={"ecs": source, "elastic_id": raw.get("_id")},
             )
         )
     return events
