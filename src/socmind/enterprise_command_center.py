@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .case_workflow import ALLOWED, CaseState
+from .case_workflow import ALLOWED, CLOSED_STATES, PAUSED_STATES, CaseState
 from .postgres_store import _psycopg, initialize_postgres
 from .sla import evaluate_sla
 
@@ -20,6 +20,8 @@ class EnterpriseCase:
     title: str | None = None
     acknowledged_at: str | None = None
     evidence_path: str | None = None
+    sla_paused_at: str | None = None
+    sla_paused_seconds: int = 0
 
 
 def _iso(value) -> str | None:
@@ -42,6 +44,8 @@ def _row_to_case(row: dict) -> EnterpriseCase:
         title=row.get("title"),
         acknowledged_at=_iso(row.get("acknowledged_at")),
         evidence_path=row.get("evidence_path"),
+        sla_paused_at=_iso(row.get("sla_paused_at")),
+        sla_paused_seconds=max(0, int(row.get("sla_paused_seconds") or 0)),
     )
 
 
@@ -66,9 +70,10 @@ def upsert_case_pg(
                 """
                 INSERT INTO cases(
                   case_id,state,priority,owner,opened_at,updated_at,
-                  source,title,acknowledged_at,evidence_path
+                  source,title,acknowledged_at,evidence_path,
+                  sla_paused_at,sla_paused_seconds
                 )
-                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NULL,%s)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NULL,%s,%s,%s)
                 ON CONFLICT(case_id) DO UPDATE SET
                   state=EXCLUDED.state,
                   priority=EXCLUDED.priority,
@@ -76,7 +81,9 @@ def upsert_case_pg(
                   updated_at=EXCLUDED.updated_at,
                   source=COALESCE(EXCLUDED.source,cases.source),
                   title=COALESCE(EXCLUDED.title,cases.title),
-                  evidence_path=COALESCE(EXCLUDED.evidence_path,cases.evidence_path)
+                  evidence_path=COALESCE(EXCLUDED.evidence_path,cases.evidence_path),
+                  sla_paused_at=EXCLUDED.sla_paused_at,
+                  sla_paused_seconds=EXCLUDED.sla_paused_seconds
                 """,
                 (
                     case.case_id,
@@ -88,6 +95,8 @@ def upsert_case_pg(
                     source,
                     title,
                     evidence_path,
+                    case.sla_paused_at,
+                    max(0, int(case.sla_paused_seconds)),
                 ),
             )
         conn.commit()
@@ -182,9 +191,31 @@ def transition_case_pg(
             current = row["state"]
             if target not in ALLOWED.get(current, set()):
                 raise ValueError(f"Invalid transition: {current} -> {target}")
+
+            paused_at = row.get("sla_paused_at")
+            paused_seconds = max(0, int(row.get("sla_paused_seconds") or 0))
+            was_paused = current in PAUSED_STATES
+            will_pause = target in PAUSED_STATES
+
+            if was_paused and not will_pause:
+                if paused_at is not None:
+                    paused_seconds += max(
+                        0,
+                        int((now - paused_at).total_seconds()),
+                    )
+                paused_at = None
+            elif not was_paused and will_pause:
+                paused_at = now
+            elif was_paused and will_pause and paused_at is None:
+                paused_at = now
+
             cur.execute(
-                "UPDATE cases SET state=%s, updated_at=%s WHERE case_id=%s",
-                (target, now, case_id),
+                """
+                UPDATE cases
+                SET state=%s, updated_at=%s, sla_paused_at=%s, sla_paused_seconds=%s
+                WHERE case_id=%s
+                """,
+                (target, now, paused_at, paused_seconds, case_id),
             )
             cur.execute(
                 """
@@ -278,7 +309,7 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
             collections = cur.fetchall()
 
     case_payload = dict(case)
-    for key in ("opened_at", "updated_at", "acknowledged_at"):
+    for key in ("opened_at", "updated_at", "acknowledged_at", "sla_paused_at"):
         case_payload[key] = _iso(case_payload.get(key))
     for row in notes:
         row["created_at"] = _iso(row.get("created_at"))
@@ -357,12 +388,17 @@ def command_center_snapshot_pg(
     active_all = [
         case
         for case in all_cases
-        if case.state not in {"resolved", "false-positive"}
+        if case.state not in CLOSED_STATES
     ]
     breached = [
         case.case_id
         for case in active_all
-        if evaluate_sla(case.opened_at, priority=case.priority).breached
+        if evaluate_sla(
+            case.opened_at,
+            priority=case.priority,
+            paused_seconds=case.sla_paused_seconds,
+            paused_at=case.sla_paused_at,
+        ).breached
     ]
 
     owner_counts: dict[str, int] = {}
@@ -387,10 +423,15 @@ def command_center_snapshot_pg(
     active_filtered = [
         case
         for case in cases
-        if case.state not in {"resolved", "false-positive"}
+        if case.state not in CLOSED_STATES
     ]
     sla_by_case = {
-        case.case_id: evaluate_sla(case.opened_at, priority=case.priority)
+        case.case_id: evaluate_sla(
+            case.opened_at,
+            priority=case.priority,
+            paused_seconds=case.sla_paused_seconds,
+            paused_at=case.sla_paused_at,
+        )
         for case in active_filtered
     }
 
@@ -402,6 +443,7 @@ def command_center_snapshot_pg(
             "p1_active": sum(1 for case in active_all if case.priority == "P1"),
             "unassigned": sum(1 for case in active_all if not case.owner),
             "sla_breached": len(breached),
+            "sla_paused": sum(1 for case in active_all if case.state in PAUSED_STATES),
             "resolved": len(resolved),
             "mtta_minutes": round(sum(mtta_values) / len(mtta_values), 1)
             if mtta_values
@@ -439,6 +481,8 @@ def command_center_snapshot_pg(
                 "sla": {
                     "breached": sla_by_case[case.case_id].breached,
                     "remaining_minutes": sla_by_case[case.case_id].remaining_minutes,
+                    "paused": sla_by_case[case.case_id].paused,
+                    "paused_minutes": sla_by_case[case.case_id].paused_minutes,
                 }
                 if case.case_id in sla_by_case
                 else None,

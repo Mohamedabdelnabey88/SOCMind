@@ -106,6 +106,66 @@ def test_orchestrated_case_exposes_alert_chain_and_unified_timeline(tmp_path):
     assert "sha256 mismatch" in tampered_payload["errors"]
 
 
+def test_web_case_lifecycle_exposes_paused_sla(tmp_path):
+    db = tmp_path / "soc.db"
+    evidence_dir = tmp_path / "evidence"
+    events_path = ROOT / "examples/attack_chain.jsonl"
+    events = load_jsonl(events_path)
+    base = events[0]
+
+    alert = AlertRecord(
+        "WEB-LIFECYCLE-001",
+        "wazuh",
+        base.timestamp,
+        "Lifecycle web alert",
+        8,
+        base.host,
+        user=base.user,
+        src_ip=base.src_ip,
+        rule_id="WEB-LIFE-1",
+    )
+    result = orchestrate_alert_sqlite(
+        db,
+        alert,
+        events,
+        evidence_dir=evidence_dir,
+    )
+
+    app = create_app(
+        events_path,
+        case_id=result.case_id,
+        command_db=db,
+        rules_dir=ROOT / "detections",
+    )
+    client = TestClient(app)
+
+    triage = client.post(
+        f"/api/cases/{result.case_id}/transition",
+        json={"state": "triage"},
+    )
+    assert triage.status_code == 200
+
+    waiting = client.post(
+        f"/api/cases/{result.case_id}/transition",
+        json={"state": "waiting-for-evidence"},
+    )
+    assert waiting.status_code == 200
+    payload = waiting.json()
+    assert payload["case"]["state"] == "waiting-for-evidence"
+    assert payload["case"]["sla_paused_at"] is not None
+
+    queue = client.get("/api/command-center").json()["queue"]
+    item = next(x for x in queue if x["case_id"] == result.case_id)
+    assert item["sla"]["paused"] is True
+
+    resume = client.post(
+        f"/api/cases/{result.case_id}/transition",
+        json={"state": "investigating"},
+    )
+    assert resume.status_code == 200
+    assert resume.json()["case"]["sla_paused_at"] is None
+
+
 def test_web_reports_v16_api_version():
     app = create_app(
         ROOT / "examples/attack_chain.jsonl",

@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[sigma,web]" pytest httpx
+      - run: pip install --retries 8 --timeout 60 -e ".[sigma,web]" pytest httpx
       - run: python -m compileall -q src
       - run: node --check src/socmind/web/app.js
       - run: pytest -q
@@ -93,7 +93,7 @@ jobs:
       - name: Create isolated Kali environment
         run: python3 -m venv .venv
       - name: Install SOCMind in Kali venv
-        run: .venv/bin/pip install -e ".[sigma,web]" pytest httpx
+        run: .venv/bin/pip install --retries 8 --timeout 60 -e ".[sigma,web]" pytest httpx
       - name: Run test suite on Kali
         run: .venv/bin/pytest -q
       - name: Exercise Kali investigation workflow
@@ -219,7 +219,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[sigma,web,enterprise]" pytest httpx
+      - run: pip install --retries 8 --timeout 60 -e ".[sigma,web,enterprise]" pytest httpx
       - run: socmind postgres-init
       - run: socmind postgres-health --json
       - run: pytest -q tests/test_enterprise_foundation.py tests/test_postgres_enterprise.py

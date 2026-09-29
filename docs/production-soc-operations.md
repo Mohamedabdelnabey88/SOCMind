@@ -345,3 +345,43 @@ GET /api/cases/{case_id}/evidence-integrity
 The web Case Workspace surfaces the same state as `VALID`, `INVALID`, manifest missing, or unavailable.
 
 This provides tamper detection for the stored evidence package. It does **not** provide cryptographic signing, trusted timestamping, immutable/WORM storage, or proof of custody outside SOCMind; those require separate controls.
+
+## Advanced case lifecycle
+
+SOCMind now supports a fuller operational lifecycle:
+
+```text
+new
+  -> triage
+  -> investigating
+  -> waiting-for-evidence
+  -> waiting-for-user
+  -> contained
+  -> monitoring
+  -> resolved / false-positive
+```
+
+Allowed transitions are intentionally constrained rather than permitting arbitrary state changes. Waiting cases can return to triage/investigating, move to monitoring when appropriate, or close when the investigation is complete. Contained cases can return to investigating if containment is not sufficient.
+
+### SLA pause/resume
+
+The operational SLA clock pauses only in:
+
+- `waiting-for-evidence`
+- `waiting-for-user`
+
+SOCMind persists both the active pause start and accumulated paused seconds. Moving between the two waiting states does not reset the pause. Leaving a waiting state atomically adds the elapsed pause interval to the accumulated total and resumes the SLA clock.
+
+This behavior is implemented consistently for:
+
+- standalone case JSON
+- SQLite Command Center
+- PostgreSQL enterprise case store
+- CLI SLA output
+- web Command Center / Case Workspace
+
+Existing SQLite/PostgreSQL stores are migrated in place with nullable/defaulted lifecycle columns. Older case JSON files remain loadable with zero accumulated pause.
+
+Waiting and monitoring cases remain active for alert correlation. Only `resolved` and `false-positive` cases are excluded from new alert attachment.
+
+The Command Center exposes both SLA breach count and paused-SLA count. A case that breached before entering a waiting state remains visibly `BREACHED · PAUSED`; pausing never erases a prior breach.

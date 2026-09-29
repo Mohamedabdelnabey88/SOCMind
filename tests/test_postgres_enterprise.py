@@ -77,6 +77,60 @@ def test_postgres_enterprise_store_round_trip():
     assert health["socmind_tables"] == 6
 
 
+def test_postgres_lifecycle_pause_resume_and_schema_migration():
+    reset_database()
+    upsert_case_pg(
+        DSN,
+        new_case("PG-LIFECYCLE", priority="P1"),
+        source="elastic",
+        title="Lifecycle pause case",
+    )
+    transition_case_pg(DSN, "PG-LIFECYCLE", "triage", actor="tier1")
+    transition_case_pg(
+        DSN,
+        "PG-LIFECYCLE",
+        "waiting-for-evidence",
+        actor="tier1",
+    )
+
+    psycopg = _psycopg()
+    with psycopg.connect(DSN) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT sla_paused_at,sla_paused_seconds
+                FROM cases WHERE case_id=%s
+                """,
+                ("PG-LIFECYCLE",),
+            )
+            paused_at, paused_seconds = cur.fetchone()
+            assert paused_at is not None
+            assert int(paused_seconds) == 0
+            cur.execute(
+                """
+                UPDATE cases
+                SET sla_paused_at=NOW() - INTERVAL '10 minutes'
+                WHERE case_id=%s
+                """,
+                ("PG-LIFECYCLE",),
+            )
+        conn.commit()
+
+    snap = command_center_snapshot_pg(DSN)
+    item = next(x for x in snap["queue"] if x["case_id"] == "PG-LIFECYCLE")
+    assert item["sla"]["paused"] is True
+
+    transition_case_pg(DSN, "PG-LIFECYCLE", "investigating", actor="tier1")
+    detail = case_detail_pg(DSN, "PG-LIFECYCLE")
+    assert detail["case"]["sla_paused_at"] is None
+    assert detail["case"]["sla_paused_seconds"] >= 9 * 60
+
+    snap = command_center_snapshot_pg(DSN)
+    item = next(x for x in snap["queue"] if x["case_id"] == "PG-LIFECYCLE")
+    assert item["sla"]["paused"] is False
+    assert item["sla"]["paused_minutes"] >= 9
+
+
 def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):
     reset_database()
     upsert_case_pg(

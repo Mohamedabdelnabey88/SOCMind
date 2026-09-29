@@ -83,8 +83,13 @@ def postgres_schema() -> str:
   source TEXT,
   title TEXT,
   acknowledged_at TIMESTAMPTZ,
-  evidence_path TEXT
+  evidence_path TEXT,
+  sla_paused_at TIMESTAMPTZ,
+  sla_paused_seconds BIGINT NOT NULL DEFAULT 0
 );
+
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS sla_paused_at TIMESTAMPTZ;
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS sla_paused_seconds BIGINT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS case_notes (
   id BIGSERIAL PRIMARY KEY,

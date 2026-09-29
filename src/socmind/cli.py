@@ -18,7 +18,7 @@ from .adapters import (
 )
 from .case import export_case
 from .audit import append_audit
-from .case_workflow import assign, load_case, new_case, save_case, transition
+from .case_workflow import VALID_STATES, assign, load_case, new_case, save_case, transition
 from .coverage import build_coverage, detection_gaps, render_coverage
 from .contradiction import contradiction_payload, render_contradictions
 from .command_center import (
@@ -220,7 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     case_move = sub.add_parser("case-transition", help="Move a case through the SOC lifecycle")
     case_move.add_argument("case_file")
-    case_move.add_argument("--state", required=True)
+    case_move.add_argument("--state", choices=VALID_STATES, required=True)
 
     sla_cmd = sub.add_parser("sla", help="Evaluate the case response SLA")
     sla_cmd.add_argument("case_file")
@@ -279,7 +279,7 @@ def build_parser() -> argparse.ArgumentParser:
     command_transition = sub.add_parser("command-transition", help="Transition a registered case")
     command_transition.add_argument("database")
     command_transition.add_argument("case_id")
-    command_transition.add_argument("--state", required=True)
+    command_transition.add_argument("--state", choices=VALID_STATES, required=True)
     command_transition.add_argument("--actor", default="cli-analyst")
 
     command_note = sub.add_parser("command-note", help="Add a note to a registered case")
@@ -667,10 +667,16 @@ def main() -> None:
 
     if args.command == "sla":
         case = load_case(args.case_file)
-        status = evaluate_sla(case.opened_at, priority=case.priority)
+        status = evaluate_sla(
+            case.opened_at,
+            priority=case.priority,
+            paused_seconds=case.sla_paused_seconds,
+            paused_at=case.sla_paused_at,
+        )
         print(
             f"{case.case_id} | {status.priority} | elapsed={status.elapsed_minutes}m "
-            f"| target={status.target_minutes}m | breached={'yes' if status.breached else 'no'}"
+            f"| target={status.target_minutes}m | breached={'yes' if status.breached else 'no'} "
+            f"| paused={'yes' if status.paused else 'no'} | paused_total={status.paused_minutes}m"
         )
         return
 

@@ -71,10 +71,10 @@ async function loadCommandCenter(){
     }
     q("#commandState").textContent="Live local queue";
     const s=commandPayload.summary;
-    const metrics=[["Active Cases",s.active],["P1 Active",s.p1_active],["SLA Breaches",s.sla_breached],["Unassigned",s.unassigned],["MTTA",s.mtta_minutes==null?"—":s.mtta_minutes+"m"],["MTTR",s.mttr_minutes==null?"—":s.mttr_minutes+"m"]];
+    const metrics=[["Active Cases",s.active],["P1 Active",s.p1_active],["SLA Breaches",s.sla_breached],["SLA Paused",s.sla_paused||0],["Unassigned",s.unassigned],["MTTA",s.mtta_minutes==null?"—":s.mtta_minutes+"m"],["MTTR",s.mttr_minutes==null?"—":s.mttr_minutes+"m"]];
     q("#commandCards").innerHTML=metrics.map(m=>'<div class="metric"><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join("");
     q("#caseQueue").innerHTML=commandPayload.queue.map(item=>{
-      let sla="Closed";if(item.sla)sla=item.sla.breached?'<span class="sla-breach">BREACHED</span>':esc(item.sla.remaining_minutes+"m");
+      let sla="Closed";if(item.sla)sla=item.sla.breached?(item.sla.paused?'<span class="sla-breach">BREACHED · PAUSED</span>':'<span class="sla-breach">BREACHED</span>'):item.sla.paused?'<span class="chip">PAUSED · '+esc(item.sla.remaining_minutes+"m")+'</span>':esc(item.sla.remaining_minutes+"m");
       return '<tr class="case-row" data-case="'+esc(item.case_id)+'"><td><strong>'+esc(item.case_id)+'</strong><br><span>'+esc(item.title||"")+'</span></td><td><span class="priority '+esc(item.priority.toLowerCase())+'">'+esc(item.priority)+'</span></td><td>'+esc(item.state)+'</td><td>'+esc(item.owner||"Unassigned")+'</td><td>'+sla+'</td></tr>';
     }).join("")||'<tr><td colspan="5">No matching cases.</td></tr>';
     qa(".case-row").forEach(row=>row.addEventListener("click",()=>openCase(row.dataset.case)));
@@ -88,7 +88,8 @@ async function openCase(caseId){
   if(!res.ok)return;
   const data=await res.json(),c=data.case;
   q("#caseDetailPanel").classList.remove("hidden");q("#detailTitle").textContent=(c.title||c.case_id)+" · "+c.case_id;
-  q("#detailMeta").innerHTML='<span class="priority '+esc(c.priority.toLowerCase())+'">'+esc(c.priority)+'</span><span>'+esc(c.state)+'</span><span>Owner: '+esc(c.owner||"Unassigned")+'</span><span>Source: '+esc(c.source||"—")+'</span><span>Acknowledged: '+esc(c.acknowledged_at||"No")+'</span>';
+  const pauseMeta=c.sla_paused_at?'<span>SLA: PAUSED</span>':(c.sla_paused_seconds?'<span>SLA paused total: '+esc(Math.floor(c.sla_paused_seconds/60))+'m</span>':'');
+  q("#detailMeta").innerHTML='<span class="priority '+esc(c.priority.toLowerCase())+'">'+esc(c.priority)+'</span><span>'+esc(c.state)+'</span><span>Owner: '+esc(c.owner||"Unassigned")+'</span><span>Source: '+esc(c.source||"—")+'</span><span>Acknowledged: '+esc(c.acknowledged_at||"No")+'</span>'+pauseMeta;
   q("#assignOwner").value=c.owner||"";
   q("#caseNotes").innerHTML=data.notes.map(n=>'<div><b>'+esc(n.author)+'</b><span>'+esc(n.created_at)+'</span><p>'+esc(n.text)+'</p></div>').join("")||"<div>No notes yet.</div>";
   q("#caseAudit").innerHTML=data.audit.map(a=>'<div><b>'+esc(a.action)+'</b><span>'+esc(a.actor)+' · '+esc(a.timestamp)+'</span><p>'+esc(a.detail)+'</p></div>').join("")||"<div>No audit entries yet.</div>";

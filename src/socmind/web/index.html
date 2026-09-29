@@ -48,7 +48,7 @@
             <div class="filters">
               <input id="caseSearch" placeholder="Search case, title, source">
               <select id="priorityFilter"><option value="">All priorities</option><option>P1</option><option>P2</option><option>P3</option></select>
-              <select id="stateFilter"><option value="">All states</option><option>new</option><option>triage</option><option>investigating</option><option>contained</option><option>resolved</option><option>false-positive</option></select>
+              <select id="stateFilter"><option value="">All states</option><option>new</option><option>triage</option><option>investigating</option><option>waiting-for-evidence</option><option>waiting-for-user</option><option>contained</option><option>monitoring</option><option>resolved</option><option>false-positive</option></select>
               <button id="applyFilters">Apply</button>
             </div>
             <div class="table-wrap"><table><thead><tr><th>Case</th><th>Priority</th><th>State</th><th>Owner</th><th>SLA</th></tr></thead><tbody id="caseQueue"></tbody></table></div>
@@ -69,7 +69,10 @@
               <option value="">Transition…</option>
               <option value="triage">triage</option>
               <option value="investigating">investigating</option>
+              <option value="waiting-for-evidence">waiting-for-evidence</option>
+              <option value="waiting-for-user">waiting-for-user</option>
               <option value="contained">contained</option>
+              <option value="monitoring">monitoring</option>
               <option value="resolved">resolved</option>
               <option value="false-positive">false-positive</option>
             </select>

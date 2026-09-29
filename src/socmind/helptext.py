@@ -42,6 +42,10 @@ Operate:
   socmind command-ack socmind.db INC-001
   socmind command-assign socmind.db INC-001 --owner tier2 --actor shift-lead
   socmind command-transition socmind.db INC-001 --state triage --actor tier2
+  socmind command-transition socmind.db INC-001 --state investigating --actor tier2
+  socmind command-transition socmind.db INC-001 --state waiting-for-evidence --actor tier2
+  # waiting-for-evidence / waiting-for-user pause the operational SLA clock
+  # resume with investigating or monitoring when the dependency clears
   socmind command-note socmind.db INC-001 --author tier2 --text "Validated source identity."
   socmind command-show socmind.db INC-001
 """,
