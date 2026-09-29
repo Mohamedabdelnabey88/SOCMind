@@ -356,6 +356,37 @@ def add_case_note(
         return int(cur.lastrowid)
 
 
+def record_case_activity(
+    db_path: str | Path,
+    case_id: str,
+    *,
+    activity: str,
+    actor: str,
+    detail: str,
+) -> None:
+    allowed = {"escalation", "detection-feedback"}
+    clean_activity = str(activity or "").strip().lower()
+    if clean_activity not in allowed:
+        raise ValueError(f"Unsupported case activity: {clean_activity}")
+    clean_actor = str(actor or "").strip() or "analyst"
+    clean_detail = str(detail or "").strip()
+    if not clean_detail:
+        raise ValueError("Activity detail cannot be empty")
+    if len(clean_actor) > 120:
+        raise ValueError("Actor must be 120 characters or fewer")
+    if len(clean_detail) > 5000:
+        raise ValueError("Activity detail must be 5000 characters or fewer")
+    now = datetime.now(timezone.utc).isoformat()
+    action = "escalated" if clean_activity == "escalation" else "detection-feedback-recorded"
+    with connect(db_path) as conn:
+        _require_case(conn, case_id)
+        conn.execute(
+            "INSERT INTO case_audit(case_id,actor,action,detail,timestamp) VALUES(?,?,?,?,?)",
+            (case_id, clean_actor, action, clean_detail, now),
+        )
+        conn.commit()
+
+
 def case_detail(db_path: str | Path, case_id: str) -> dict:
     with connect(db_path) as conn:
         case = dict(_require_case(conn, case_id))

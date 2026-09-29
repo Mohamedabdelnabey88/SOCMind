@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — v1.6 Unified Case Timeline
+
+- add one normalized operational timeline across detections, evidence, alerts and analyst actions
+- standardize every timeline entry with timestamp, type, source, actor and detail
+- distinguish alert received, case created and alert correlated events using persisted orchestration audit data
+- derive detection-event timestamps from the evidence that completed each finding
+- classify acknowledgement, assignment, state transition, containment and resolution events
+- persist permission-controlled escalation and detection-feedback activities
+- add a read-only case timeline API endpoint
+- expose normalized source/actor/type fields in the Case Workspace
+- preserve backward-compatible kind/title fields and alert correlation detail
+- add deterministic ordering, malformed-timestamp safety and duplicate-note regression tests
+- validate SQLite, PostgreSQL and trusted-proxy RBAC paths
+
 ## Unreleased — v1.6 Evidence Requirements
 
 - convert validation gaps and unresolved questions into explicit Evidence Requirements

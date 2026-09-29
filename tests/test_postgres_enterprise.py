@@ -13,6 +13,7 @@ from socmind.enterprise_command_center import (
     assign_case_pg,
     case_detail_pg,
     command_center_snapshot_pg,
+    record_case_activity_pg,
     transition_case_pg,
     upsert_case_pg,
 )
@@ -221,6 +222,35 @@ def test_postgres_concurrent_requirement_creation_collapses_to_one_row():
 
     assert len(set(ids)) == 1
     assert len(list_requirements_pg(DSN, "PG-REQ-CONCURRENT")) == 1
+
+
+def test_postgres_case_activities_are_persistent_and_auditable():
+    reset_database()
+    upsert_case_pg(
+        DSN,
+        new_case("PG-TIMELINE-ACT", priority="P2"),
+        source="elastic",
+        title="PostgreSQL timeline activities",
+    )
+    record_case_activity_pg(
+        DSN,
+        "PG-TIMELINE-ACT",
+        activity="escalation",
+        actor="tier2",
+        detail="Escalated to IR for privileged account impact",
+    )
+    record_case_activity_pg(
+        DSN,
+        "PG-TIMELINE-ACT",
+        activity="detection-feedback",
+        actor="lead",
+        detail="Add regression coverage for observed chain",
+    )
+
+    detail = case_detail_pg(DSN, "PG-TIMELINE-ACT")
+    actions = {row["action"] for row in detail["audit"]}
+    assert "escalated" in actions
+    assert "detection-feedback-recorded" in actions
 
 
 def test_postgres_web_workspace_with_trusted_proxy_rbac(tmp_path):

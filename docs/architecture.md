@@ -32,3 +32,4 @@ flowchart LR
 6. **Composable adapters** — future SIEM, EDR, auditd, Sigma, MISP, and threat-intel integrations can feed the same model.
 7. **Missing evidence is an operational dependency, not a contradiction** — validation gaps can become permission-controlled Evidence Requirements with explicit lifecycle and audit history.
 8. **Case state changes are auditable facts** — persistent case stores expose structured transition history derived from the append-only case audit trail.
+9. **Timeline is a read model over durable facts** — the unified case timeline normalizes alerts, evidence, detections and audited analyst actions without replacing their source records.

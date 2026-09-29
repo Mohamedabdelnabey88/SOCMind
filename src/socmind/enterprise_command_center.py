@@ -276,6 +276,41 @@ def add_case_note_pg(
     return note_id
 
 
+def record_case_activity_pg(
+    dsn: str,
+    case_id: str,
+    *,
+    activity: str,
+    actor: str,
+    detail: str,
+) -> None:
+    allowed = {"escalation", "detection-feedback"}
+    clean_activity = str(activity or "").strip().lower()
+    if clean_activity not in allowed:
+        raise ValueError(f"Unsupported case activity: {clean_activity}")
+    clean_actor = str(actor or "").strip() or "analyst"
+    clean_detail = str(detail or "").strip()
+    if not clean_detail:
+        raise ValueError("Activity detail cannot be empty")
+    if len(clean_actor) > 120:
+        raise ValueError("Actor must be 120 characters or fewer")
+    if len(clean_detail) > 5000:
+        raise ValueError("Activity detail must be 5000 characters or fewer")
+    action = "escalated" if clean_activity == "escalation" else "detection-feedback-recorded"
+    now = datetime.now(timezone.utc)
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            _require_case(cur, case_id)
+            cur.execute(
+                """
+                INSERT INTO case_audit(case_id,actor,action,detail,timestamp)
+                VALUES(%s,%s,%s,%s,%s)
+                """,
+                (case_id, clean_actor, action, clean_detail, now),
+            )
+        conn.commit()
+
+
 def case_detail_pg(dsn: str, case_id: str) -> dict:
     with _connect(dsn) as conn:
         with conn.cursor() as cur:
