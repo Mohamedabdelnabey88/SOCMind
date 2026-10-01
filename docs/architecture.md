@@ -36,3 +36,22 @@ flowchart LR
 10. **Identity is verified before RBAC** — local token, signed trusted-proxy and native OIDC authentication all resolve to the same SOCMind Principal/RBAC model.
 11. **OIDC secrets stay out of source control** — client/session secrets are runtime environment values; provider discovery and JWKS are verified over HTTPS by default.
 12. **OIDC browser sessions are bounded and same-origin** — Authorization Code + PKCE S256, state/nonce checks, signed HttpOnly cookies and safe return-path validation are enforced before workspace access.
+
+## Production operations modules
+
+| Responsibility | Modules |
+| --- | --- |
+| Alert normalization, identity and correlation | `production_ops`, `orchestration` |
+| Case transactions and lifecycle | `command_center`, `enterprise_command_center`, `cases` |
+| Evidence requirements and timeline | `evidence_requests`, `unified_timeline` |
+| Working evidence manifests | `evidence_integrity` |
+| Immutable artifacts and metadata | `evidence_artifacts`, `operations_store` |
+| Local and S3-compatible byte storage | `evidence_storage` |
+| Browser identity and authorization | `oidc_auth`, `enterprise_auth`, `rbac` |
+
+Working JSONL packages remain mutable under per-case locks and manifest checks.
+Explicit artifact registration copies bytes into a content-addressed store;
+SQLite/PostgreSQL retain provenance and hashes. The core uses a put/get protocol,
+while the optional S3 factory owns the SDK dependency. Database and object-store
+writes are not a distributed transaction: failed registration may leave an
+unreferenced object and requires operator reconciliation, never silent deletion.

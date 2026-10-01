@@ -63,3 +63,18 @@ def test_verify_manifest_detects_evidence_tampering(tmp_path):
     assert "sha256 mismatch" in result.errors
     assert "size mismatch" in result.errors
     assert "event_count mismatch" in result.errors
+
+
+def test_merge_refuses_to_rebaseline_tampered_evidence(tmp_path):
+    import pytest
+    from socmind.orchestration import _merge_evidence
+    from socmind.io import load_jsonl
+    from pathlib import Path
+    events = load_jsonl(Path(__file__).resolve().parents[1] / 'examples/attack_chain.jsonl')
+    path = tmp_path / 'case.jsonl'
+    _merge_evidence(path, events, case_id='C', source='test')
+    manifest = evidence_manifest_path(path).read_bytes()
+    path.write_bytes(path.read_bytes() + b'\n')
+    with pytest.raises(ValueError, match='integrity'):
+        _merge_evidence(path, events, case_id='C', source='test')
+    assert evidence_manifest_path(path).read_bytes() == manifest

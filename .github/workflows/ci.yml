@@ -228,3 +228,84 @@ jobs:
       - run: socmind alert-orchestrate wazuh tests/fixtures/wazuh-alerts.jsonl --postgres-dsn "$SOCMIND_POSTGRES_DSN" --evidence-dir pg-alert-evidence --json
       - run: socmind alert-orchestrate elastic tests/fixtures/elastic-security-alerts.ndjson --postgres-dsn "$SOCMIND_POSTGRES_DSN" --evidence-dir pg-elastic-alert-evidence --json
       - run: socmind alert-live --help
+
+  object-storage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[storage]" pytest
+      - name: Checkout pinned public MinIO source
+        run: |
+          git init "$RUNNER_TEMP/minio-source"
+          git -C "$RUNNER_TEMP/minio-source" remote add origin https://github.com/minio/minio.git
+          # Includes upstream If-None-Match fix; the September release rejects new keys.
+          git -C "$RUNNER_TEMP/minio-source" fetch --depth 1 origin 7aac2a2c5b7c882e68c1ce017d8256be2feea27f
+          git -C "$RUNNER_TEMP/minio-source" checkout --detach FETCH_HEAD
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ runner.temp }}/minio-source/go.mod
+          cache: false
+      - name: Build isolated test server
+        working-directory: ${{ runner.temp }}/minio-source
+        run: go build -o "$RUNNER_TEMP/socmind-minio" .
+      - name: Start isolated HTTPS MinIO
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/socmind-minio-certs" "$RUNNER_TEMP/socmind-minio-data"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout "$RUNNER_TEMP/socmind-minio-certs/private.key" \
+            -out "$RUNNER_TEMP/socmind-minio-certs/public.crt" \
+            -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+          storage_test_password=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          echo "::add-mask::$storage_test_password"
+          echo "AWS_ACCESS_KEY_ID=socmind-ci" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=$storage_test_password" >> "$GITHUB_ENV"
+          echo "AWS_DEFAULT_REGION=us-east-1" >> "$GITHUB_ENV"
+          echo "AWS_CA_BUNDLE=$RUNNER_TEMP/socmind-minio-certs/public.crt" >> "$GITHUB_ENV"
+          echo "SOCMIND_TEST_S3_ENDPOINT=https://localhost:9000" >> "$GITHUB_ENV"
+          MINIO_ROOT_USER=socmind-ci MINIO_ROOT_PASSWORD="$storage_test_password" \
+            "$RUNNER_TEMP/socmind-minio" server "$RUNNER_TEMP/socmind-minio-data" \
+            --address 127.0.0.1:9000 --certs-dir "$RUNNER_TEMP/socmind-minio-certs" \
+            > "$RUNNER_TEMP/socmind-minio.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/socmind-minio.pid"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --cacert "$RUNNER_TEMP/socmind-minio-certs/public.crt" https://localhost:9000/minio/health/ready; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/socmind-minio.log"
+          exit 1
+      - run: pytest -q tests/test_object_storage_integration.py
+      - name: Stop isolated test service
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/socmind-minio.pid"; then
+            kill "$(cat "$RUNNER_TEMP/socmind-minio.pid")" || true
+          fi
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, kali, package, postgres, object-storage]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish v1.6.0 only after all main quality gates pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          python -c 'import tomllib; assert tomllib.load(open("pyproject.toml", "rb"))["project"]["version"] == "1.6.0"'
+          if gh release view v1.6.0 >/dev/null 2>&1; then
+            echo "v1.6.0 is already published; leaving it unchanged."
+            exit 0
+          fi
+          gh release create v1.6.0 --target "$GITHUB_SHA" --latest \
+            --title "SOCMind v1.6.0 — Production SOC Operations" \
+            --notes-file docs/releases/v1.6.0.md

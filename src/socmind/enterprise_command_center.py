@@ -368,6 +368,7 @@ def case_detail_pg(dsn: str, case_id: str) -> dict:
     for row in audit:
         row["timestamp"] = _iso(row.get("timestamp"))
     for row in alerts:
+        row["alert_id"] = row.get("source_alert_id") or row["alert_id"]
         row["timestamp"] = _iso(row.get("timestamp"))
         row["created_at"] = _iso(row.get("created_at"))
         row["linked_at"] = _iso(row.get("linked_at"))

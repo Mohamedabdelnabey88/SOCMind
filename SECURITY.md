@@ -4,7 +4,7 @@ SOCMind is a defensive Blue Team project and may process sensitive security tele
 
 ## Supported release
 
-The current supported release line is **1.5.x**.
+The current supported release line is **1.6.x**.
 
 ## Reporting a vulnerability
 
@@ -37,11 +37,11 @@ SOCMind is designed with these defaults:
 
 ## Production boundary
 
-SOCMind 1.5 adds an enterprise foundation with RBAC, trusted-proxy identity, PostgreSQL case storage, tamper-evident audit, backup, and retention tooling.
+SOCMind 1.6 supports RBAC, native OIDC, trusted-proxy identity, PostgreSQL case storage, integrity verification and explicit analyst-controlled workflows.
 
 A production deployment should still provide organization-specific:
 
-- identity-aware reverse proxy backed by SSO/OIDC/SAML
+- a configured OIDC provider or a secured identity-aware reverse proxy
 - TLS termination
 - secrets management
 - centralized immutable/WORM audit storage
@@ -53,3 +53,21 @@ A production deployment should still provide organization-specific:
 - load/soak validation for the intended analyst and telemetry scale
 
 The built-in local API token is intended for local/small deployments. Trusted-proxy mode requires a correctly secured authenticating proxy and shared signing secret. The proxy must strip client-supplied `X-SOCMind-*` identity headers, generate fresh timestamped signatures, and keep the signing secret out of analyst browsers.
+
+## OIDC and evidence controls
+
+OIDC uses Authorization Code with PKCE, state/nonce validation and verified ID
+tokens. Cookie-authenticated mutations require the Origin configured by the
+public redirect URI. Discovery/token/JWKS endpoint redirects are refused. Sessions
+are signed, HttpOnly and bounded by token expiry (maximum eight hours); they
+have no central per-session revocation or IdP back-channel logout. Rotate the
+session secret to invalidate all sessions. Test group mappings with your IdP.
+
+Local CLI actor/role options are operator assertions within the OS-account trust
+boundary, not remote authentication. Restrict CLI and database access accordingly.
+Evidence directories must be service-owned. Artifacts are limited to 64 MiB,
+content-addressed and conditionally created; object endpoints require HTTPS.
+Conditional-write support is required from S3-compatible servers. Storage admins
+can still alter objects: verification detects changes, but is not WORM or trusted
+custody proof. Back up metadata and evidence together. Registration failures may
+leave unreferenced objects; SOCMind does not silently delete evidence.

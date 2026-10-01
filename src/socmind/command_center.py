@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS case_audit (
 );
 CREATE TABLE IF NOT EXISTS alerts (
     alert_id TEXT PRIMARY KEY,
+    source_alert_id TEXT,
     source TEXT NOT NULL,
     timestamp TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -104,6 +105,20 @@ CREATE TABLE IF NOT EXISTS evidence_collections (
     completed_at TEXT,
     FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS evidence_artifacts (
+    artifact_id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(case_id),
+    sha256 TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    original_name TEXT NOT NULL,
+    collected_at TEXT NOT NULL,
+    collector TEXT NOT NULL,
+    source TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    storage_id TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_case ON evidence_artifacts(case_id);
+
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority,state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);
 CREATE INDEX IF NOT EXISTS idx_notes_case ON case_notes(case_id,created_at);
@@ -169,6 +184,11 @@ def connect(path: str | Path) -> sqlite3.Connection:
     _retry_locked(configure_journal)
     conn.execute("PRAGMA synchronous=NORMAL")
     _retry_locked(lambda: conn.executescript(SCHEMA))
+    conn.execute("BEGIN IMMEDIATE")
+    alert_columns = {row[1] for row in conn.execute("PRAGMA table_info(alerts)")}
+    if "source_alert_id" not in alert_columns:
+        conn.execute("ALTER TABLE alerts ADD COLUMN source_alert_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_source_identity ON alerts(source,source_alert_id)")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
     for name, sql_type in {
         "acknowledged_at": "TEXT",
@@ -423,6 +443,7 @@ def case_detail(db_path: str | Path, case_id: str) -> dict:
             ).fetchall()
         ]
         for item in alerts:
+            item["alert_id"] = item.get("source_alert_id") or item["alert_id"]
             try:
                 item["correlation_reasons"] = json.loads(item["correlation_reasons"])
             except (TypeError, json.JSONDecodeError):

@@ -1,3 +1,4 @@
+from . import __version__
 import argparse
 import json
 import os
@@ -115,7 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="SOCMind 1.6.0")
+    parser.add_argument("--version", action="version", version=f"SOCMind {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show task-oriented SOCMind help")
@@ -478,6 +479,22 @@ def build_parser() -> argparse.ArgumentParser:
     security_cmd.add_argument("--host", default="127.0.0.1")
     security_cmd.add_argument("--command-db")
     security_cmd.add_argument("--json", action="store_true")
+
+    for verb in ("artifact-register", "artifact-verify"):
+        artifact_cmd = sub.add_parser(verb, help="Register or verify immutable evidence snapshots")
+        artifact_cmd.add_argument("case_id")
+        artifact_cmd.add_argument("--database", default="socmind.db")
+        artifact_cmd.add_argument("--postgres-dsn")
+        storage = artifact_cmd.add_mutually_exclusive_group(required=True)
+        storage.add_argument("--evidence-dir")
+        storage.add_argument("--bucket")
+        artifact_cmd.add_argument("--endpoint")
+        artifact_cmd.add_argument("--prefix", default="socmind-evidence/")
+        artifact_cmd.add_argument("--storage-id", default="local")
+        artifact_cmd.add_argument("--actor", default="cli-analyst")
+        if verb == "artifact-register":
+            artifact_cmd.add_argument("path")
+            artifact_cmd.add_argument("--source", required=True)
 
     benchmark_cmd = sub.add_parser("benchmark", help="Run a repeatable local investigation benchmark")
     benchmark_cmd.add_argument("--events", type=int, default=5000)
@@ -1249,6 +1266,27 @@ def main() -> None:
             for item in checks:
                 print(f"[{'OK' if item.ok else 'WARN'}] {item.name}: {item.detail}")
         raise SystemExit(0 if all(item.ok for item in checks) else 1)
+
+    if args.command in {"artifact-register", "artifact-verify"}:
+        from .evidence_artifacts import register_artifact, verify_artifacts
+        from .evidence_storage import configured_store
+        from .rbac import Principal
+        store = configured_store(directory=args.evidence_dir, bucket=args.bucket,
+                                 endpoint=args.endpoint, prefix=args.prefix)
+        target = args.postgres_dsn or args.database
+        if args.postgres_dsn:
+            initialize_postgres(args.postgres_dsn)
+        actor = Principal(args.actor, "admin", "local-cli")
+        if args.command == "artifact-register":
+            result = register_artifact(target, args.case_id, args.path, store, storage_id=args.storage_id,
+                                       source=args.source, principal=actor, postgres=bool(args.postgres_dsn))
+        else:
+            result = verify_artifacts(target, args.case_id, {args.storage_id: store}, principal=actor,
+                                      postgres=bool(args.postgres_dsn))
+        print(json.dumps(result, indent=2))
+        if args.command == "artifact-verify" and any(x["integrity_status"] != "verified" for x in result):
+            raise SystemExit(1)
+        return
 
     if args.command == "benchmark":
         result = run_benchmark(args.events)

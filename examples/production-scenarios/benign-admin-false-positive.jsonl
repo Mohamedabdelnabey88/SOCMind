@@ -1,0 +1,2 @@
+{"timestamp": "2026-09-28T10:03:00Z", "source": "sysmon", "event_id": "1", "host": "WS-023", "user": "m.abdelnaby", "process": "powershell.exe", "parent_process": "explorer.exe", "command_line": "powershell.exe Get-Service"}
+{"timestamp": "2026-09-28T10:04:00Z", "source": "windows-security", "event_id": "4624", "host": "WS-023", "user": "m.abdelnaby", "src_ip": "198.51.100.22"}

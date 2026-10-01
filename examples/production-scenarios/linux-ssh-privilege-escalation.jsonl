@@ -1,0 +1,8 @@
+{"timestamp": "2026-09-28T13:00:00Z", "source": "linux-auth", "event_id": "ssh_auth_failed", "host": "LINUX-01", "user": "ops", "src_ip": "198.51.100.23"}
+{"timestamp": "2026-09-28T13:01:00Z", "source": "linux-auth", "event_id": "ssh_auth_failed", "host": "LINUX-01", "user": "ops", "src_ip": "198.51.100.23"}
+{"timestamp": "2026-09-28T13:02:00Z", "source": "linux-auth", "event_id": "ssh_auth_failed", "host": "LINUX-01", "user": "ops", "src_ip": "198.51.100.23"}
+{"timestamp": "2026-09-28T13:03:00Z", "source": "linux-auth", "event_id": "ssh_auth_failed", "host": "LINUX-01", "user": "ops", "src_ip": "198.51.100.23"}
+{"timestamp": "2026-09-28T13:04:00Z", "source": "linux-auth", "event_id": "ssh_auth_failed", "host": "LINUX-01", "user": "ops", "src_ip": "198.51.100.23"}
+{"timestamp": "2026-09-28T13:06:00Z", "source": "linux-auth", "event_id": "ssh_auth_success", "host": "LINUX-01", "user": "ops", "src_ip": "198.51.100.23"}
+{"timestamp": "2026-09-28T13:07:00Z", "source": "linux-audit", "event_id": "sudo_command", "host": "LINUX-01", "user": "ops", "command_line": "sudo useradd backup-admin"}
+{"timestamp": "2026-09-28T13:09:00Z", "source": "linux-systemd", "event_id": "systemd_service_created", "host": "LINUX-01", "user": "root", "data": {"unit": "backup-agent.service"}}

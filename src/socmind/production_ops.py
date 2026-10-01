@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
@@ -59,7 +60,7 @@ def alert_priority(severity: int) -> str:
 def case_id_for_alert(alert: AlertRecord) -> str:
     digest = hashlib.sha256(
         f"{alert.source}|{alert.alert_id}".encode("utf-8")
-    ).hexdigest()[:8].upper()
+    ).hexdigest()[:32].upper()
     return f"INC-{alert.timestamp:%Y%m%d}-{digest}"
 
 
@@ -76,6 +77,19 @@ def alert_fingerprint(alert: AlertRecord) -> str:
         ]
     )
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _known_context(value: str | None) -> bool:
+    return isinstance(value, str) and value.strip().lower() not in {
+        "", "unknown", "none", "null", "n/a", "-", "wazuh-host", "elastic-host",
+    }
+
+
+def _fallback_identity(event: Event, provider: str) -> str:
+    payload = asdict(event)
+    payload["timestamp"] = event.timestamp.isoformat()
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return provider + "-fallback-" + hashlib.sha256(serialized.encode()).hexdigest()
 
 
 def correlate_alerts(
@@ -96,19 +110,19 @@ def correlate_alerts(
         score += weight
         reasons.append(CorrelationReason(key, weight, detail))
 
-    if left.host and right.host and left.host.lower() == right.host.lower():
+    if _known_context(left.host) and _known_context(right.host) and left.host.lower() == right.host.lower():
         add("same-host", 30, f"Same host: {left.host}")
-    if left.user and right.user and left.user.lower() == right.user.lower():
+    if _known_context(left.user) and _known_context(right.user) and left.user.lower() == right.user.lower():
         add("same-user", 20, f"Same user: {left.user}")
-    if left.process and right.process and left.process.lower() == right.process.lower():
+    if _known_context(left.process) and _known_context(right.process) and left.process.lower() == right.process.lower():
         add("same-process", 15, f"Same process: {left.process}")
-    if left.src_ip and right.src_ip and left.src_ip == right.src_ip:
+    if _known_context(left.src_ip) and _known_context(right.src_ip) and left.src_ip == right.src_ip:
         add("same-source-ip", 15, f"Same source IP: {left.src_ip}")
-    if left.dst_ip and right.dst_ip and left.dst_ip == right.dst_ip:
+    if _known_context(left.dst_ip) and _known_context(right.dst_ip) and left.dst_ip == right.dst_ip:
         add("same-destination-ip", 10, f"Same destination IP: {left.dst_ip}")
-    if left.rule_id and right.rule_id and left.rule_id == right.rule_id:
+    if _known_context(left.rule_id) and _known_context(right.rule_id) and left.rule_id == right.rule_id:
         add("same-rule", 10, f"Same rule: {left.rule_id}")
-    if left.technique and right.technique and left.technique == right.technique:
+    if _known_context(left.technique) and _known_context(right.technique) and left.technique == right.technique:
         add("same-technique", 15, f"Same ATT&CK technique: {left.technique}")
 
     score = min(score, 100)
@@ -145,7 +159,7 @@ def collect_evidence_window(
         for event in events
         if start <= event.timestamp <= end
         and (
-            event.host.lower() == alert.host.lower()
+            (_known_context(alert.host) and _known_context(event.host) and event.host.lower() == alert.host.lower())
             or (
                 alert.user
                 and event.user
@@ -248,7 +262,7 @@ def alert_from_event(event: Event) -> AlertRecord:
                 None,
             )
         return AlertRecord(
-            alert_id=str(alert_id or f"wazuh-{rule_id}-{int(event.timestamp.timestamp())}"),
+            alert_id=str(alert_id or _fallback_identity(event, "wazuh")),
             source="wazuh",
             timestamp=event.timestamp,
             title=title,
@@ -281,7 +295,7 @@ def alert_from_event(event: Event) -> AlertRecord:
     alert_id = str(
         data.get("elastic_id")
         or ecs.get("_id")
-        or f"elastic-{rule_id}-{int(event.timestamp.timestamp())}"
+        or _fallback_identity(event, "elastic")
     )
     return AlertRecord(
         alert_id=alert_id,

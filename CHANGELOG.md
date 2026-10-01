@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased — v1.6 Native OIDC / SSO
+## 1.6.0 — Production SOC Operations
+
+### Storage, identity and validation
+
+- Reconcile the production-operations branch with the OIDC, rule-lifecycle,
+  timeline, requirements and lifecycle work already merged into main.
+- Add immutable local/S3-compatible artifact storage with SQLite/PostgreSQL
+  metadata, SHA-256 verification and explicit collector provenance.
+- Refuse to merge new evidence over a working file that fails its recorded hash.
+- Add six synthetic SOC workflow scenarios and reproducible local load results.
+- Display host, user, process and priority in correlated-alert details.
+
+- Scope alert deduplication by provider and preserve original IDs through additive migrations.
+- Exclude unknown context from correlation and select only eligible candidates deterministically.
+- Enforce same-origin OIDC mutations and reject redirects during token/discovery requests.
+- Unify package, CLI and API versions.
+
+
+### Native OIDC / SSO
 
 - add generic OpenID Connect Authorization Code flow with PKCE S256
 - discover authorization/token/JWKS endpoints from the configured issuer
@@ -13,7 +31,7 @@
 - add cryptographic RSA JWT tests and end-to-end FastAPI OIDC session tests
 - provider-specific live validation remains deployment-dependent and is not claimed by CI
 
-## Unreleased — v1.6 Detection Rule Lifecycle
+### Detection Rule Lifecycle
 
 - add governed rule states: experimental / testing / approved / production / deprecated / retired
 - persist rule version, owner, timestamps, change notes and ATT&CK mapping in an atomic registry
@@ -25,7 +43,7 @@
 - add CLI operations for registration, validation, replay, FP history, coverage, versioning and transitions
 - add concurrency, RBAC and promotion-gate regression tests
 
-## Unreleased — v1.6 Unified Case Timeline
+### Unified Case Timeline
 
 - add one normalized operational timeline across detections, evidence, alerts and analyst actions
 - standardize every timeline entry with timestamp, type, source, actor and detail
@@ -39,7 +57,7 @@
 - add deterministic ordering, malformed-timestamp safety and duplicate-note regression tests
 - validate SQLite, PostgreSQL and trusted-proxy RBAC paths
 
-## Unreleased — v1.6 Evidence Requirements
+### Evidence Requirements
 
 - convert validation gaps and unresolved questions into explicit Evidence Requirements
 - add requirement lifecycle: required / requested / received / unavailable / waived
@@ -53,7 +71,7 @@
 - add structured state history with actor, timestamp, from/to state and reason
 - validate requirement concurrency, lifecycle, RBAC, SQLite and PostgreSQL paths
 
-## Unreleased — v1.6 Advanced Case Lifecycle
+### Advanced Case Lifecycle
 
 - add waiting-for-evidence, waiting-for-user and monitoring operational states
 - enforce explicit lifecycle transition rules across file, SQLite and PostgreSQL case flows
@@ -66,7 +84,7 @@
 - add lifecycle, migration, pause/resume, web and correlation regression tests
 - harden CI dependency installs against transient package-download failures
 
-## Unreleased — v1.6 Evidence Integrity
+### Evidence Integrity
 
 - generate atomic SHA-256 sidecar manifests for case evidence packages
 - record case ID, evidence filename, digest, size, collection timestamp, source and event count
@@ -76,7 +94,7 @@
 - surface VALID/INVALID/missing-manifest state in the Case Workspace
 - add tamper-detection tests and cross-platform CI exercise
 
-## Unreleased — v1.6 Live Alert Ingestion
+### Live Alert Ingestion
 
 - pull Elastic Security alerts directly into the case-orchestration pipeline
 - pull Wazuh Indexer `wazuh-alerts*` hits directly without temporary exports
@@ -88,7 +106,7 @@
 - expand correlation/evidence boundary regression coverage
 
 
-## Unreleased — v1.6 Live Evidence Collector
+### Live Evidence Collector
 
 - derive live evidence queries from alerts already linked to a case
 - collect surrounding telemetry from Elastic or Wazuh Indexer/OpenSearch-compatible APIs
@@ -101,7 +119,7 @@
 - keep TLS verification enabled by default and credentials in environment variables
 
 
-## 1.6.0 — Production SOC Operations — Milestone 1
+### Alert Orchestration
 
 - Wazuh/Elastic alert promotion into operational SOC cases
 - deterministic source-alert IDs and idempotent duplicate handling

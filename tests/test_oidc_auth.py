@@ -325,6 +325,72 @@ def test_web_oidc_login_callback_and_logout(monkeypatch, tmp_path):
         "source": "oidc",
     }
 
-    logout = client.post("/auth/logout", follow_redirects=False)
+    logout = client.post("/auth/logout", headers={"Origin": "http://localhost"}, follow_redirects=False)
     assert logout.status_code == 303
     assert client.get("/api/me").status_code == 401
+
+
+def test_cookie_mutations_require_configured_origin(tmp_path):
+    app = webapp.create_app(
+        "examples/attack_chain.jsonl", auth_mode="oidc",
+        oidc_issuer="https://idp.example.test", oidc_client_id="client",
+        oidc_redirect_uri="https://socmind.example.test/auth/callback",
+        oidc_session_secret=SECRET,
+    )
+    client = TestClient(app, base_url="https://socmind.example.test")
+    cookie, _ = session_from_claims(_config(), {
+        "iss": "https://idp.example.test", "sub": "alice", "groups": ["SOC-T1"],
+        "exp": int(time.time()) + 600,
+    })
+    client.cookies.set("socmind_oidc_session", cookie)
+    for origin in (None, "https://evil.example.test", "null"):
+        headers = {} if origin is None else {"Origin": origin}
+        assert client.post("/api/cases/test/acknowledge", headers=headers).status_code == 403
+    # Passes CSRF and authentication; no case store is configured in this fixture.
+    assert client.post("/api/cases/test/acknowledge", headers={
+        "Origin": "https://socmind.example.test"}).status_code == 409
+
+
+def test_oidc_rejects_endpoint_redirects():
+    from urllib.request import Request
+    with pytest.raises(ValueError, match="redirects"):
+        oidc._NoRedirect().redirect_request(Request("https://idp.example.test"),
+            None, 302, "Found", {}, "http://evil.example.test")
+
+
+def test_client_basic_encodes_reserved_characters(monkeypatch):
+    import base64
+    captured = {}
+    def request(url, **kwargs):
+        captured.update(kwargs)
+        return {"id_token": "token"}
+    monkeypatch.setattr(oidc, "_json_request", request)
+    exchange_code(_config(client_id="id:with space", client_secret="s+&:"),
+        {"token_endpoint": "https://idp.example.test/token"}, code="code", verifier="v")
+    encoded = captured["extra_headers"]["Authorization"].split()[1]
+    assert base64.b64decode(encoded).decode() == "id%3Awith+space:s%2B%26%3A"
+
+
+@pytest.mark.parametrize("invalid", ["issuer", "audience", "expiry", "signature", "nonce"])
+def test_real_jwks_validation_rejects_invalid_tokens(monkeypatch, invalid):
+    import json
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private.public_key()))
+    key.update({"kid": "key-1", "use": "sig", "alg": "RS256"})
+    requested = []
+    def request(uri):
+        requested.append(uri)
+        return {"keys": [key]}
+    monkeypatch.setattr(oidc, "_json_request", request)
+    now = int(time.time())
+    claims = {"iss": _config().issuer, "sub": "alice", "aud": _config().client_id,
+              "iat": now - 60, "exp": now + 600, "nonce": "nonce"}
+    if invalid == "issuer": claims["iss"] = "https://other.example"
+    if invalid == "audience": claims["aud"] = "other-client"
+    if invalid == "expiry": claims["exp"] = now - 1
+    if invalid == "nonce": claims["nonce"] = "other"
+    if invalid == "signature": private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    token = jwt.encode(claims, private, algorithm="RS256", headers={"kid": "key-1"})
+    with pytest.raises(PermissionError):
+        verify_id_token(_config(), {"jwks_uri": "https://idp.example.test/jwks"}, token, nonce="nonce")
+    assert requested == ["https://idp.example.test/jwks"]

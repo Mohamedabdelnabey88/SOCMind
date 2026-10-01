@@ -215,3 +215,13 @@ socmind help triage
 socmind help case-workflow
 socmind help integrations
 ```
+
+## Immutable evidence storage
+
+- `artifact-register CASE FILE --database DB --evidence-dir DIR --source SOURCE`
+- `artifact-verify CASE --database DB --evidence-dir DIR`
+- Both commands support `--postgres-dsn`, `--actor`, and `--storage-id`.
+- S3 alternative: `--bucket BUCKET --endpoint https://HOST --storage-id NAME`.
+  Credentials come from the SDK's environment/profile/workload identity chain.
+- These commands manage immutable snapshots; `evidence-verify` remains the
+  existing working-file manifest verifier.

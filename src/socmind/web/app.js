@@ -100,7 +100,7 @@ async function openCase(caseId){
     const reasons=(a.correlation_reasons||[]).map(r=>'<li>'+esc(r.detail)+' <span>+'+esc(r.weight)+'</span></li>').join("");
     const rule=a.rule_id?(' · rule '+esc(a.rule_id)):"";
     const technique=a.technique?(' · '+esc(a.technique)):"";
-    return '<div><b>'+esc(a.alert_id)+' · '+esc(a.source)+'</b><span>'+esc(a.timestamp)+' · severity '+esc(a.severity)+' · correlation '+esc(a.correlation_score)+rule+technique+'</span><p>'+esc(a.title)+'</p>'+(reasons?'<ul>'+reasons+'</ul>':'<p class="score">Root alert / no correlation reason required.</p>')+'</div>';
+    return '<div><b>'+esc(a.alert_id)+' · '+esc(a.source)+'</b><span>'+esc(a.timestamp)+' · severity '+esc(a.severity)+' · correlation '+esc(a.correlation_score)+rule+technique+'</span><p>'+esc(a.title)+'</p><p>'+esc(a.priority)+' · Host: '+esc(a.host||'—')+' · User: '+esc(a.user||'—')+' · Process: '+esc(a.process||'—')+'</p>'+(reasons?'<ul>'+reasons+'</ul>':'<p class="score">Root alert / no correlation reason required.</p>')+'</div>';
   }).join("")||"<div>No orchestrated alerts linked to this case.</div>";
   q("#caseEvidenceRequirements").innerHTML=(data.evidence_requirements||[]).map(item=>{
     const due=item.due_at?(' · due '+esc(item.due_at)):"";

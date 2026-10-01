@@ -24,7 +24,7 @@ Disposition
 Coverage / Gap Analysis / Tuning
 ```
 
-> **v1.6 — Production SOC Operations**
+> **v1.6.0 — Production SOC Operations**
 
 SOCMind is not a SIEM replacement. It is an analyst investigation, escalation, and detection-quality layer.
 
@@ -76,7 +76,15 @@ socmind analyze examples/linux_attack_chain.jsonl \
 
 Detailed guide: [Running SOCMind on Kali Linux](docs/kali-linux.md)
 
-## v1.6 Production SOC Operations — Milestone 1
+## v1.6.0 Production SOC Operations
+
+This release combines alert orchestration, advanced case lifecycle and SLA pauses,
+evidence requirements, a unified timeline, integrity verification, governed rule
+promotion, native OIDC and local/S3-compatible evidence snapshots. Six repeatable
+SOC scenarios and measured load results accompany the implementation.
+
+See [the production operations guide](docs/production-soc-operations.md) for
+configuration, migrations, validation and deployment boundaries.
 
 SOCMind can now promote Wazuh/Elastic alerts into an operational case queue instead of requiring every investigation to start from a manually prepared evidence file.
 
@@ -116,7 +124,7 @@ socmind alert-orchestrate elastic alerts.ndjson \
 
 The correlation decision is deterministic, configurable, concurrency-safe, and records the exact reasons each alert was attached to a case.
 
-### Milestone 2 — Live Evidence Collector
+### Live Evidence Collector
 
 Once alerts are linked to a case, SOCMind can derive the case context and pull surrounding telemetry directly from Elastic or Wazuh Indexer:
 

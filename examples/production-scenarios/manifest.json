@@ -1,0 +1,50 @@
+[
+  {
+    "name": "password-spray-account-compromise",
+    "provider": "wazuh",
+    "events": "password-spray-account-compromise.jsonl",
+    "alerts": "password-spray-account-compromise-alerts.jsonl",
+    "expected_findings": true,
+    "analyst_disposition": "resolved"
+  },
+  {
+    "name": "office-powershell-c2",
+    "provider": "elastic",
+    "events": "office-powershell-c2.jsonl",
+    "alerts": "office-powershell-c2-alerts.jsonl",
+    "expected_findings": true,
+    "analyst_disposition": "resolved"
+  },
+  {
+    "name": "linux-ssh-privilege-escalation",
+    "provider": "wazuh",
+    "events": "linux-ssh-privilege-escalation.jsonl",
+    "alerts": "linux-ssh-privilege-escalation-alerts.jsonl",
+    "expected_findings": true,
+    "analyst_disposition": "resolved"
+  },
+  {
+    "name": "scheduled-task-persistence",
+    "provider": "elastic",
+    "events": "scheduled-task-persistence.jsonl",
+    "alerts": "scheduled-task-persistence-alerts.jsonl",
+    "expected_findings": true,
+    "analyst_disposition": "resolved"
+  },
+  {
+    "name": "benign-admin-false-positive",
+    "provider": "wazuh",
+    "events": "benign-admin-false-positive.jsonl",
+    "alerts": "benign-admin-false-positive-alerts.jsonl",
+    "expected_findings": false,
+    "analyst_disposition": "false-positive"
+  },
+  {
+    "name": "multi-alert-incident",
+    "provider": "elastic",
+    "events": "multi-alert-incident.jsonl",
+    "alerts": "multi-alert-incident-alerts.jsonl",
+    "expected_findings": true,
+    "analyst_disposition": "resolved"
+  }
+]

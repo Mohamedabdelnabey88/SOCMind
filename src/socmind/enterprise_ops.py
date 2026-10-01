@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS case_audit (
 
 CREATE TABLE IF NOT EXISTS alerts (
   alert_id TEXT PRIMARY KEY,
+  source_alert_id TEXT,
   source TEXT NOT NULL,
   timestamp TIMESTAMPTZ NOT NULL,
   title TEXT NOT NULL,
@@ -127,6 +128,9 @@ CREATE TABLE IF NOT EXISTS alerts (
   raw_reference TEXT,
   created_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS source_alert_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_alert_source_identity ON alerts(source,source_alert_id);
 
 CREATE TABLE IF NOT EXISTS case_alerts (
   case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
@@ -154,6 +158,20 @@ CREATE TABLE IF NOT EXISTS evidence_collections (
   started_at TIMESTAMPTZ NOT NULL,
   completed_at TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS evidence_artifacts (
+    artifact_id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(case_id),
+    sha256 TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    original_name TEXT NOT NULL,
+    collected_at TEXT NOT NULL,
+    collector TEXT NOT NULL,
+    source TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    storage_id TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_case ON evidence_artifacts(case_id);
 
 CREATE INDEX IF NOT EXISTS idx_cases_priority_state ON cases(priority, state);
 CREATE INDEX IF NOT EXISTS idx_cases_owner ON cases(owner);

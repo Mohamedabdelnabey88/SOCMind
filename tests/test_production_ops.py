@@ -189,3 +189,31 @@ def test_same_host_rule_and_technique_do_not_auto_merge_without_context_anchor()
     result = correlate_alerts(first, second)
     assert result.score == 55
     assert result.related is False
+
+
+def test_unknown_context_does_not_justify_correlation():
+    from datetime import datetime, timezone
+    now=datetime.now(timezone.utc)
+    a=AlertRecord('a','wazuh',now,'Unknown',8,'unknown',user='unknown',process='unknown',rule_id='same')
+    b=AlertRecord('b','wazuh',now,'Unknown',8,'unknown',user='unknown',process='unknown',rule_id='same')
+    assert not correlate_alerts(a,b).related
+
+
+def test_missing_source_ids_use_full_context_not_just_second_and_rule():
+    from socmind.adapters.wazuh import wazuh_alert_to_event
+    raw={'timestamp':'2026-09-29T10:00:00Z','rule':{'id':'one','level':8},'agent':{'name':'host-a'}}
+    first=alert_from_event(wazuh_alert_to_event(raw))
+    other=alert_from_event(wazuh_alert_to_event({**raw,'agent':{'name':'host-b'}}))
+    assert first.alert_id != other.alert_id
+    assert first.alert_id == alert_from_event(wazuh_alert_to_event(raw)).alert_id
+
+
+def test_best_match_prefers_eligible_candidate_and_stable_tie_break():
+    from datetime import datetime, timezone
+    from socmind.orchestration import _best_match
+    now=datetime.now(timezone.utc)
+    incoming=AlertRecord('new','wazuh',now,'New',8,'host',user='alice',process='cmd',rule_id='rule',technique='T1000')
+    weak=AlertRecord('weak','wazuh',now,'Weak',8,'host',rule_id='rule',technique='T1000')
+    eligible=AlertRecord('good','wazuh',now,'Good',8,'other',user='alice',process='cmd',rule_id='rule')
+    case_id,result=_best_match(incoming,[('weak',weak),('z',eligible),('a',eligible)],window_minutes=15,threshold=40)
+    assert result.related and case_id=='a'
