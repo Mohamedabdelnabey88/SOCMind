@@ -1,3 +1,4 @@
+from . import __version__
 import argparse
 import json
 import os
@@ -115,7 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="SOCMind 1.6.0")
+    parser.add_argument("--version", action="version", version=f"SOCMind {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show task-oriented SOCMind help")

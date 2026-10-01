@@ -28,7 +28,7 @@ sigma = ["PyYAML>=6.0.2"]
 web = ["fastapi>=0.116.0", "uvicorn>=0.35.0", "PyJWT[crypto]>=2.10.0"]
 enterprise = ["psycopg[binary]>=3.2.0"]
 oidc = ["PyJWT[crypto]>=2.10.0"]
-all = ["python-evtx>=0.8.1", "PyYAML>=6.0.2", "fastapi>=0.116.0", "uvicorn>=0.35.0", "PyJWT[crypto]>=2.10.0", "psycopg[binary]>=3.2.0"]
+all = ["python-evtx>=0.8.1", "PyYAML>=6.0.2", "fastapi>=0.116.0", "uvicorn>=0.35.0", "PyJWT[crypto]>=2.10.0", "psycopg[binary]>=3.2.0", "boto3>=1.35.0"]
 
 [project.scripts]
 socmind = "socmind.cli:main"

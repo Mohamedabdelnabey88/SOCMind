@@ -1,7 +1,9 @@
+from . import __version__
 import secrets
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .audit_chain import append_record, verify_chain
 from .command_center import (
@@ -88,7 +90,7 @@ def create_app(
 ):
     try:
         from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
-        from fastapi.responses import FileResponse, RedirectResponse
+        from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
         from fastapi.staticfiles import StaticFiles
     except ImportError as exc:
         raise RuntimeError(
@@ -103,7 +105,7 @@ def create_app(
     assets = Path(__file__).with_name("web")
     app = FastAPI(
         title="SOCMind Enterprise SOC Workspace",
-        version="1.6.0",
+        version=__version__,
         docs_url="/api/docs",
         redoc_url=None,
     )
@@ -163,6 +165,13 @@ def create_app(
 
     @app.middleware("http")
     async def security_headers(request, call_next):
+        config = app.state.oidc_config
+        if config is not None and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            # Compare against configured public origin, never an untrusted Host header.
+            target = urlparse(config.redirect_uri)
+            expected_origin = f"{target.scheme}://{target.netloc}"
+            if request.headers.get("origin") != expected_origin:
+                return JSONResponse(status_code=403, content={"detail": "Same-origin request required"})
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"

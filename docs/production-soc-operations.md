@@ -1,4 +1,4 @@
-# SOCMind v1.6 — Production SOC Operations (Milestone 1)
+# SOCMind v1.6.0 — Production SOC Operations
 
 This milestone introduces the first production-style alert orchestration path:
 
@@ -180,7 +180,7 @@ CI contains concurrent-ingestion regression tests for both stores.
 
 ## Case workspace
 
-Case detail now includes an **Alert Chain**.
+Case detail includes **Correlated Alerts**.
 
 An analyst can review every linked alert and the exact reasons it was associated with the case.
 
@@ -188,18 +188,9 @@ This keeps correlation explainable and auditable instead of becoming an opaque g
 
 ## Production boundaries
 
-This milestone does not yet claim:
-
-- streaming webhook receivers
-- Kafka/queue ingestion
-- remote evidence collection from endpoints
-- object-storage evidence backend
-- native OIDC
-- full detection-rule lifecycle
-
-Those are subsequent v1.6 production-operations milestones.
-
-The current milestone establishes the case-orchestration core they can safely build on.
+The release does not include streaming webhooks, Kafka ingestion or endpoint
+agents. Live collection queries a configured SIEM API. Operators must validate
+provider permissions, retention, availability and deployment-specific scale.
 
 ## Detection Rule Lifecycle
 
@@ -260,10 +251,10 @@ socmind rule-transition rule-registry.json socmind-win-powershell-hidden \
   --note "Begin validation"
 ```
 
-The local CLI role is an explicit operator policy assertion, not an identity provider. Native OIDC/SSO is a separate v1.6 milestone.
+The local CLI role is an explicit operator policy assertion, not an identity provider. Web authentication supports native OIDC as described below.
 
 
-## Milestone 2 — Live Evidence Collector
+## Live Evidence Collector
 
 SOCMind can now use the alerts already linked to a case to build an auditable live evidence query against an Elasticsearch-compatible backend.
 
@@ -626,3 +617,34 @@ instead of only rule plus second. New deterministic case IDs use a 128-bit
 suffix. Existing case IDs are not rewritten. Unknown placeholder context does
 not justify automatic correlation, and eligible candidates take precedence over
 higher-scoring candidates that fail the contextual-anchor policy.
+
+## Native OIDC / SSO
+
+Use `socmind web --auth-mode oidc` with the issuer, client ID and public callback
+URI options listed by `socmind web --help`. Supply client and session secrets
+through `SOCMIND_OIDC_CLIENT_SECRET` and `SOCMIND_OIDC_SESSION_SECRET`. Configure
+claim-to-role mapping explicitly, for example SOC-T1 to analyst, SOC-T2 to
+senior-analyst, SOC-Leads to lead and SOC-Admins to admin. Unmapped identities
+default to viewer. Local-token and signed trusted-proxy modes remain available.
+
+The implementation verifies signatures, issuer, audience, expiry, nonce and
+PKCE/state, uses signed HttpOnly cookies and requires the configured public
+Origin for mutations. Tokens are not stored in the repository. Discovery/token
+redirects are rejected. Sessions expire with the ID token or within eight hours;
+central revocation/back-channel logout is not implemented. Generic protocol
+and cryptographic tests do not certify a live Entra ID, Keycloak or Okta tenant.
+
+## Upgrade and validation
+
+Back up databases, working evidence, immutable objects and the rule registry
+before upgrading. SQLite and PostgreSQL apply additive schema upgrades; legacy
+alert IDs and case IDs remain readable. Initialize PostgreSQL with
+`socmind postgres-init` before artifact operations. The CLI assumes trusted OS
+access; web roles are derived from the configured authentication mode.
+
+CI runs Windows/Ubuntu Python 3.11/3.12, Kali Rolling, PostgreSQL 16, a built
+wheel, and an isolated real MinIO server over verified HTTPS. The MinIO fixture
+is pinned to upstream commit `7aac2a2c5b7c882e68c1ce017d8256be2feea27f`, which
+contains the conditional-create fix missing in the September 2025 release.
+Deployments need an equivalent compatible implementation; SOCMind never falls
+back to unconditional evidence overwrite.

@@ -325,6 +325,47 @@ def test_web_oidc_login_callback_and_logout(monkeypatch, tmp_path):
         "source": "oidc",
     }
 
-    logout = client.post("/auth/logout", follow_redirects=False)
+    logout = client.post("/auth/logout", headers={"Origin": "http://localhost"}, follow_redirects=False)
     assert logout.status_code == 303
     assert client.get("/api/me").status_code == 401
+
+
+def test_cookie_mutations_require_configured_origin(tmp_path):
+    app = webapp.create_app(
+        "examples/attack_chain.jsonl", auth_mode="oidc",
+        oidc_issuer="https://idp.example.test", oidc_client_id="client",
+        oidc_redirect_uri="https://socmind.example.test/auth/callback",
+        oidc_session_secret=SECRET,
+    )
+    client = TestClient(app, base_url="https://socmind.example.test")
+    cookie, _ = session_from_claims(_config(), {
+        "iss": "https://idp.example.test", "sub": "alice", "groups": ["SOC-T1"],
+        "exp": int(time.time()) + 600,
+    })
+    client.cookies.set("socmind_oidc_session", cookie)
+    for origin in (None, "https://evil.example.test", "null"):
+        headers = {} if origin is None else {"Origin": origin}
+        assert client.post("/api/cases/test/acknowledge", headers=headers).status_code == 403
+    # Passes CSRF and authentication; no case store is configured in this fixture.
+    assert client.post("/api/cases/test/acknowledge", headers={
+        "Origin": "https://socmind.example.test"}).status_code == 409
+
+
+def test_oidc_rejects_endpoint_redirects():
+    from urllib.request import Request
+    with pytest.raises(ValueError, match="redirects"):
+        oidc._NoRedirect().redirect_request(Request("https://idp.example.test"),
+            None, 302, "Found", {}, "http://evil.example.test")
+
+
+def test_client_basic_encodes_reserved_characters(monkeypatch):
+    import base64
+    captured = {}
+    def request(url, **kwargs):
+        captured.update(kwargs)
+        return {"id_token": "token"}
+    monkeypatch.setattr(oidc, "_json_request", request)
+    exchange_code(_config(client_id="id:with space", client_secret="s+&:"),
+        {"token_endpoint": "https://idp.example.test/token"}, code="code", verifier="v")
+    encoded = captured["extra_headers"]["Authorization"].split()[1]
+    assert base64.b64decode(encoded).decode() == "id%3Awith+space:s%2B%26%3A"

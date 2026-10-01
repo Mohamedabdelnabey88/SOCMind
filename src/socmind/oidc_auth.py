@@ -8,8 +8,8 @@ import json
 import secrets
 import time
 from typing import Any
-from urllib.parse import urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import quote_plus, urlencode, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .rbac import normalize_role
 
@@ -53,6 +53,8 @@ def _b64url_decode(value: str) -> bytes:
 
 def _require_https(value: str, *, allow_insecure_http: bool) -> str:
     parsed = urlparse(value)
+    if not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+        raise ValueError("OIDC endpoints require a hostname and no credentials or fragment")
     if parsed.scheme == "https":
         return value
     if allow_insecure_http and parsed.scheme == "http" and parsed.hostname in {
@@ -76,6 +78,11 @@ def discovery_url(issuer: str, *, allow_insecure_http: bool = False) -> str:
     return clean.rstrip("/") + "/.well-known/openid-configuration"
 
 
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError("OIDC endpoint redirects are not permitted")
+
+
 def _json_request(
     url: str,
     *,
@@ -92,8 +99,10 @@ def _json_request(
         body = urlencode(data).encode("utf-8")
         headers["Content-Type"] = "application/x-www-form-urlencoded"
     req = Request(url, data=body, headers=headers, method=method)
-    with urlopen(req, timeout=timeout) as response:
-        raw = response.read()
+    with build_opener(_NoRedirect()).open(req, timeout=timeout) as response:
+        raw = response.read(2 * 1024 * 1024 + 1)
+    if len(raw) > 2 * 1024 * 1024:
+        raise ValueError("OIDC response exceeds size limit")
     payload = json.loads(raw.decode("utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("OIDC endpoint returned a non-object JSON response")
@@ -317,7 +326,7 @@ def exchange_code(
         )
         if "client_secret_basic" in supported:
             credentials = (
-                f"{config.client_id}:{config.client_secret}".encode("utf-8")
+                f"{quote_plus(config.client_id)}:{quote_plus(config.client_secret)}".encode("ascii")
             )
             headers["Authorization"] = (
                 "Basic " + base64.b64encode(credentials).decode("ascii")
