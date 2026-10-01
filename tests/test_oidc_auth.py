@@ -369,3 +369,28 @@ def test_client_basic_encodes_reserved_characters(monkeypatch):
         {"token_endpoint": "https://idp.example.test/token"}, code="code", verifier="v")
     encoded = captured["extra_headers"]["Authorization"].split()[1]
     assert base64.b64decode(encoded).decode() == "id%3Awith+space:s%2B%26%3A"
+
+
+@pytest.mark.parametrize("invalid", ["issuer", "audience", "expiry", "signature", "nonce"])
+def test_real_jwks_validation_rejects_invalid_tokens(monkeypatch, invalid):
+    import json
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private.public_key()))
+    key.update({"kid": "key-1", "use": "sig", "alg": "RS256"})
+    requested = []
+    def request(uri):
+        requested.append(uri)
+        return {"keys": [key]}
+    monkeypatch.setattr(oidc, "_json_request", request)
+    now = int(time.time())
+    claims = {"iss": _config().issuer, "sub": "alice", "aud": _config().client_id,
+              "iat": now - 60, "exp": now + 600, "nonce": "nonce"}
+    if invalid == "issuer": claims["iss"] = "https://other.example"
+    if invalid == "audience": claims["aud"] = "other-client"
+    if invalid == "expiry": claims["exp"] = now - 1
+    if invalid == "nonce": claims["nonce"] = "other"
+    if invalid == "signature": private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    token = jwt.encode(claims, private, algorithm="RS256", headers={"kid": "key-1"})
+    with pytest.raises(PermissionError):
+        verify_id_token(_config(), {"jwks_uri": "https://idp.example.test/jwks"}, token, nonce="nonce")
+    assert requested == ["https://idp.example.test/jwks"]

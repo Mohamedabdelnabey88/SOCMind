@@ -374,7 +374,15 @@ def verify_id_token(
                 f"Unsupported OIDC ID-token algorithm: {algorithm}"
             )
 
-        jwk_client = jwt.PyJWKClient(jwks_uri, cache_keys=True)
+        class VerifiedJWKClient(jwt.PyJWKClient):
+            def fetch_data(self):
+                # Apply the same TLS/redirect/size policy to signing-key discovery.
+                data = _json_request(self.uri)
+                if self.jwk_set_cache is not None:
+                    self.jwk_set_cache.put(data)
+                return data
+
+        jwk_client = VerifiedJWKClient(jwks_uri, cache_keys=True)
         signing_key = jwk_client.get_signing_key_from_jwt(id_token)
         claims = jwt.decode(
             id_token,

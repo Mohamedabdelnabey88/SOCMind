@@ -58,7 +58,7 @@ The built-in local API token is intended for local/small deployments. Trusted-pr
 
 OIDC uses Authorization Code with PKCE, state/nonce validation and verified ID
 tokens. Cookie-authenticated mutations require the Origin configured by the
-public redirect URI. Discovery/token endpoint redirects are refused. Sessions
+public redirect URI. Discovery/token/JWKS endpoint redirects are refused. Sessions
 are signed, HttpOnly and bounded by token expiry (maximum eight hours); they
 have no central per-session revocation or IdP back-channel logout. Rotate the
 session secret to invalidate all sessions. Test group mappings with your IdP.

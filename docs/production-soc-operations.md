@@ -1,6 +1,6 @@
 # SOCMind v1.6.0 — Production SOC Operations
 
-This milestone introduces the first production-style alert orchestration path:
+The release connects alert orchestration to governed case, evidence and detection operations:
 
 ```text
 Wazuh / Elastic Alert
@@ -629,7 +629,7 @@ default to viewer. Local-token and signed trusted-proxy modes remain available.
 
 The implementation verifies signatures, issuer, audience, expiry, nonce and
 PKCE/state, uses signed HttpOnly cookies and requires the configured public
-Origin for mutations. Tokens are not stored in the repository. Discovery/token
+Origin for mutations. Tokens are not stored in the repository. Discovery/token/JWKS
 redirects are rejected. Sessions expire with the ID token or within eight hours;
 central revocation/back-channel logout is not implemented. Generic protocol
 and cryptographic tests do not certify a live Entra ID, Keycloak or Okta tenant.
