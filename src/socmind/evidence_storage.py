@@ -79,6 +79,8 @@ class LocalEvidenceStore:
             data = source.read(MAX_ARTIFACT_BYTES + 1)
         if len(data) > MAX_ARTIFACT_BYTES:
             raise ValueError('Evidence exceeds maximum artifact size')
+        if digest(data) != validate_key(key):
+            raise ValueError('Stored evidence failed SHA-256 verification')
         return data
 
 
@@ -116,6 +118,8 @@ class S3EvidenceStore:
             body.close()
         if len(data) > MAX_ARTIFACT_BYTES:
             raise ValueError('Evidence exceeds maximum artifact size')
+        if digest(data) != validate_key(key):
+            raise ValueError('Stored evidence failed SHA-256 verification')
         return data
 
 
