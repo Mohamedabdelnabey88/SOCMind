@@ -24,6 +24,8 @@ def test_original_preserved_and_stored_tamper_detected(tmp_path):
     assert results[0]['integrity_status'] == 'verified'
     (store.root / item['storage_key']).write_bytes(b'tampered')
     assert verify_artifacts(db, 'C', {'local': store}, principal=ACTOR)[0]['integrity_status'] == 'mismatch'
+    with pytest.raises(ValueError, match='SHA-256'):
+        store.get(item['storage_key'])
     with pytest.raises(ValueError):
         register_artifact(db, 'C', original, store, storage_id='local', source='IdP', principal=ACTOR)
     (store.root / item['storage_key']).unlink()
@@ -67,5 +69,7 @@ def test_s3_adapter_conditional_write_and_close():
     store.put(sha, b'evidence')
     assert store.get(sha) == b'evidence'
     client.data['socmind-evidence/' + sha] = b'tampered'
+    with pytest.raises(ValueError, match='SHA-256'):
+        store.get(sha)
     with pytest.raises(ValueError):
         store.put(sha, b'evidence')
