@@ -75,7 +75,11 @@ def verify_artifacts(target, case_id, stores: dict[str, EvidenceStore], *, princ
                 status = 'verified' if len(data) == item['size_bytes'] and digest(data) == item['sha256'] else 'mismatch'
             except FileNotFoundError:
                 status = 'missing'
-            except (OSError, ValueError, KeyError):
+            except ValueError:
+                # Content-addressed stores raise ValueError when stored bytes no longer
+                # match the expected digest; preserve that distinction for analysts.
+                status = 'mismatch'
+            except (OSError, KeyError):
                 status = 'unavailable'
             results.append({**item, 'integrity_status': status, 'verified_at': now})
         _audit(execute, case_id, principal.subject, 'evidence-verified',
